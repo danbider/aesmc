@@ -1,6 +1,6 @@
 # Library for Auto-Encoding Sequential Monte Carlo
 
-Testing
+This is a repo under construction, using AESMC to estimate biophysical forward models.
 
 ## Installation
 ```
