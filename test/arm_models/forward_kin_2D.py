@@ -187,61 +187,23 @@ class Proposal(nn.Module):
                 aesmc.state.BatchShapeMode.FULLY_EXPANDED)
         
 class TrainingStats(object):
-    def __init__(self, initial_loc, initial_scale, true_transition_mult,
-                 transition_scale, L1_true, L2_true, emission_scale,
-                 num_timesteps, num_test_obs, test_inference_num_particles,
-                 saving_interval=100, logging_interval=100):
+    def __init__(self, L1_true, L2_true,
+                 num_timesteps,
+                 logging_interval=100):
         self.L1_true = L1_true
         self.L2_true = L2_true
-        # self.true_transition_mult = true_transition_mult
-        # # self.true_emission_mult = true_emission_mult
-        # self.test_inference_num_particles = test_inference_num_particles
-        # self.saving_interval = saving_interval
         self.logging_interval = logging_interval
         self.curr_L1 = []
         self.curr_L2 = []
-        # self.p_l2_history = []
-        # self.iteration_idx_history = []
-        # # for simulated data -- define the true distributions:
-        # self.initial = Initial(initial_loc, initial_scale)
-        # self.true_transition = Transition(true_transition_mult,
-        #                                   transition_scale)
-        # self.true_emission = Emission(FW_kin_2D, 
-        #                             L1_true, L2_true, emission_scale)
-        # create a test dataloader that samples from the true dists.
-        # dataloader = aesmc.train.get_synthetic_dataloader(self.initial,
-        #                                                   self.true_transition,
-        #                                                   self.true_emission,
-        #                                                   num_timesteps,
-        #                                                   num_test_obs)
-        # self.test_obs = next(iter(dataloader))
-        # self.true_posterior_means = [None] * num_test_obs
-        # for test_obs_idx in range(num_test_obs):
-        #     observations = [[o[test_obs_idx]] for o in self.test_obs]
-        #     self.true_posterior_means[test_obs_idx] = np.reshape(
-        #         lgssm_true_posterior(observations, initial_loc, initial_scale,
-        #                              self.true_transition_mult, 0,
-        #                              transition_scale, self.true_emission_mult,
-        #                              0, emission_scale)[0],
-        #         (-1,))
-
+        self.loss = []
+  
     def __call__(self, epoch_idx, epoch_iteration_idx, loss, initial,
                  transition, emission, proposal):
-        '''ToDo: tailored for the lgssm case. consider logging differnt values
-       for example, L1,L2 are of interest '''
-        # if epoch_iteration_idx % self.saving_interval == 0:
-        #     self.p_l2_history.append(np.linalg.norm(
-        #         np.array([transition.mult.item(), emission.mult.item()]) -
-        #         np.array([self.true_transition_mult, self.true_emission_mult])
-        #     ))
-        # could combine one round of inference here to see how we're performing
-
         if epoch_iteration_idx % self.logging_interval == 0:
-            # ToDo - log the values of L1,L2
             print('Iteration {}: Loss = {}'.format(epoch_iteration_idx, loss))
             self.curr_L1.append(emission.L1.item())
-            self.curr_L2.append(emission.L2.item())
-            print(self.curr_L1[-1]) # TDo remove later
+            self.curr_L2.append(emission.L2.item()) # seemed to be better than detach().numpy()
+            self.loss.append(loss)
             print(np.round(np.linalg.norm(
                 np.array([emission.L1.detach().numpy(),emission.L2.detach().numpy()])-
                 np.array([self.L1_true, self.L2_true])),2))
