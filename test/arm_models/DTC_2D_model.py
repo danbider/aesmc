@@ -227,94 +227,228 @@ class Emission(nn.Module):
         return variable + self.dt * variable_derivative
     
     def forward(self, latents = None, time = None, previous_observations = None):
-        
-        # time 0
-        # use initial angles to explain data
-        # one could optimize these angles and velocities to start from a good initial point
-        #print("latent: " , latents[-1].shape)
-        if time == 0:
+    
+        """this forward method includes only euler steps from latent to observ.
+        the logic - if Euler is the problem, then we should see it here."""
             
-            print('itreration 0: length of latent[-1] = ', len(latents))
-            print('itreration 0: shape of latents[-1] = ', latents[-1].shape)
-
-            # compute dimensions 
+        #print('itreration 0: length of latent[-1] = ', len(latents))
+        #print('itreration 0: shape of latents[-1] = ', latents[-1].shape)
+    
+        # compute dimensions 
+        if time == 0:
             self.batch_size = latents[-1].shape[0]
             self.num_particles = latents[-1].shape[1]
             self.dim_latents = latents[-1].shape[2]
-            
-            
+            # use the line below just to make sure that things are running
+            # with a fixed inertia tensor
+                
             # set lists at the first time step and then append values
             self.angles = [] # append inits
             self.velocity = [] # append inits.
             self.acceleration = [] # append just in the next time step
+            self.print_test = False
             
-            init_angles = torch.zeros_like(latents[-1]).view(-1,2)
-            init_velocity = torch.zeros_like(latents[-1]).view(-1,2)
-            # compute acccel, rhs for current time. use inits and sampled torque.
-            accel_curr = self.Newton_2nd(
-                latents[-1].contiguous().view( # squeezing. ToDo: not sure about line.
-                                        self.batch_size*self.num_particles, 2, 1), # self.batch_size*self.num_particles ,2, 1),
-                                        self.D(init_angles[:,1]), 
-                                        self.h_vec(init_velocity[:,0], 
-                                                   init_velocity[:,1], 
-                                                   init_angles[:,1]), 
-                                        self.c_vec(init_angles[:,0], 
-                                                   init_angles[:,1]))
+                    # keep locally defining those zero vectors
+            init_angles = torch.zeros_like(latents[-1])
             
-            self.acceleration.append(accel_curr) # append first value
-
-            # compute current velocity using current accel (just appended) and init angle.
-            velocity_curr = self.Euler_step(init_velocity, self.acceleration[-1])
-            self.velocity.append(velocity_curr)
-
-            # compute current angles using current velocity (just appended) and init angle.
-            angles_curr = self.Euler_step(init_angles, self.velocity[-1])
-            self.angles.append(angles_curr)
+            self.angles.append(self.Euler_step(init_angles, latents[-1])) # keep dims as lat
+            # init_velocity = torch.zeros_like(latents[-1]).view(-1,2)
+    
+        else: 
+            self.angles.append(self.Euler_step(self.angles[-1], latents[-1]))
             
-
-        else: # time not zero
-            # accel_prev = Newton_2nd(torques, computed_D, computed_c_vec, computed_h_vec)
-            # ToDo: check if they have in aesmc a better way to squeeze
-            # compute previous acceleration based on previous torques, angles and velocity.
-            # note: using latents[-2] because I assume that since then, 
-            # we drew the current set of latents in the proposal.
-            print('itreration i: length of latent[-1] = ', len(latents))
-            print('itreration i: shape of latents[-1] = ', latents[-1].shape)
-            print('regular latents: ', latents[-2].shape)
-            print('contig latents: ',latents[-2].contiguous().shape)
-            print((latents[-2] == latents[-2].contiguous()).detach().numpy().all())
-            # ToDo: the part below needs extra caution:
-            accel_curr = self.Newton_2nd(
-                latents[-1].contiguous().view( # squeezing. ToDo: not sure about line.
-                                        self.batch_size*self.num_particles, 2, 1), # self.batch_size*self.num_particles ,2, 1),
-                                        self.D(self.angles[-1][:,1]), 
-                                        self.h_vec(self.velocity[-1][:,0], 
-                                                   self.velocity[-1][:,1], 
-                                                   self.angles[-1][:,1]), 
-                                        self.c_vec(self.angles[-1][:,0], 
-                                                   self.angles[-1][:,1]))
-            # append curr accel
-            self.acceleration.append(accel_curr)
-            # compute current velocity based on previous velocity and current accel.
-            velocity_curr = self.Euler_step(self.velocity[-1], self.acceleration[-1])
-            self.velocity.append(velocity_curr)
-
-            # compute current angles based on previous angles and velocity.
-            angles_curr = self.Euler_step(self.angles[-1], self.velocity[-1])
-            self.angles.append(angles_curr)
-
-          
-        # for every timestep we conclude with forward kinematics given current angles
-        #print("angles: " , self.angles[-1].shape)
-            # careful of contiguous!
-        mean_tensor = self.FW_kin_2D(self.angles[-1].contiguous().view(
-                 self.batch_size, self.num_particles, self.dim_latents))
+        if self.print_test:
+            print(time)
+            
+        # note: just pushing latents through FW-KIN works.
+        mean_tensor = self.FW_kin_2D(latents[-1].contiguous().view(
+          self.batch_size, self.num_particles, self.dim_latents)) 
         
-        #print("mean of dist: " , mean_tensor.shape)
-            
         return aesmc.state.set_batch_shape_mode(
         torch.distributions.Normal(mean_tensor, self.scale),
         aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+        # mean_tensor = self.FW_kin_2D(self.acceleration[-1].contiguous().view(
+        #           self.batch_size, self.num_particles, self.dim_latents))
+        
+    #     #print("mean of dist: " , mean_tensor.shape)
+            
+        #  Note: IMPORTANT. below is the Euler one that we should figure out.
+        # return aesmc.state.set_batch_shape_mode(
+        # torch.distributions.Normal(self.angles[-1], self.scale),
+        # aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+    
+    
+        
+            # 02/10 works, keep using later to get the output of accel or velocity
+        # return aesmc.state.set_batch_shape_mode( 
+        # torch.distributions.Normal(self.acceleration[-1].contiguous().view(
+        #           self.batch_size, self.num_particles, self.dim_latents), self.scale),
+        # aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+    ## this is the full model that doesn't work.
+    # def forward(self, latents = None, time = None, previous_observations = None):
+      
+    #     # NOTE: MULTIPLIED H,C by zero
+    #   # time 0
+    #   # use initial angles to explain data
+    #   # one could optimize these angles and velocities to start from a good initial point
+    #   #print("latent: " , latents[-1].shape)
+    #   if time == 0:
+          
+    #       print('itreration 0: length of latent[-1] = ', len(latents))
+    #       print('itreration 0: shape of latents[-1] = ', latents[-1].shape)
+
+    #       # compute dimensions 
+    #       self.batch_size = latents[-1].shape[0]
+    #       self.num_particles = latents[-1].shape[1]
+    #       self.dim_latents = latents[-1].shape[2]
+          
+          
+    #       # set lists at the first time step and then append values
+    #       self.angles = [] # append inits
+    #       self.velocity = [] # append inits.
+    #       self.acceleration = [] # append just in the next time step
+          
+    #       init_angles = torch.zeros_like(latents[-1]).view(-1,2)
+    #       init_velocity = torch.zeros_like(latents[-1]).view(-1,2)
+    #       # compute acccel, rhs for current time. use inits and sampled torque.
+    #       accel_curr = self.Newton_2nd(
+    #           latents[-1].contiguous().view( # squeezing. ToDo: not sure about line.
+    #                                   self.batch_size*self.num_particles, 2, 1), # self.batch_size*self.num_particles ,2, 1),
+    #                                   self.D(init_angles[:,1]), 
+    #                                   0 * self.h_vec(init_velocity[:,0], 
+    #                                               init_velocity[:,1], 
+    #                                               init_angles[:,1]), 
+    #                                   0 * self.c_vec(init_angles[:,0], 
+    #                                               init_angles[:,1]))
+          
+    #       self.acceleration.append(accel_curr) # append first value
+
+    #       # compute current velocity using current accel (just appended) and init angle.
+    #       velocity_curr = self.Euler_step(init_velocity, self.acceleration[-1])
+    #       self.velocity.append(velocity_curr)
+
+    #       # compute current angles using current velocity (just appended) and init angle.
+    #       angles_curr = self.Euler_step(init_angles, self.velocity[-1])
+    #       self.angles.append(angles_curr)
+          
+
+    #   else: # time not zero
+    #       # accel_prev = Newton_2nd(torques, computed_D, computed_c_vec, computed_h_vec)
+    #       # ToDo: check if they have in aesmc a better way to squeeze
+    #       # compute previous acceleration based on previous torques, angles and velocity.
+    #       # note: using latents[-2] because I assume that since then, 
+    #       # we drew the current set of latents in the proposal.
+    #       # print('itreration i: length of latent[-1] = ', len(latents))
+    #       # print('itreration i: shape of latents[-1] = ', latents[-1].shape)
+    #       # print('regular latents: ', latents[-2].shape)
+    #       # print('contig latents: ',latents[-2].contiguous().shape)
+    #       # print((latents[-2] == latents[-2].contiguous()).detach().numpy().all())
+    #       # ToDo: the part below needs extra caution:
+    #       accel_curr = self.Newton_2nd(
+    #           latents[-1].contiguous().view( # squeezing. ToDo: not sure about line.
+    #                                   self.batch_size*self.num_particles, 2, 1), # self.batch_size*self.num_particles ,2, 1),
+    #                                   self.D(self.angles[-1][:,1]), 
+    #                                   0* self.h_vec(self.velocity[-1][:,0], 
+    #                                               self.velocity[-1][:,1], 
+    #                                               self.angles[-1][:,1]), 
+    #                                   0* self.c_vec(self.angles[-1][:,0], 
+    #                                               self.angles[-1][:,1]))
+    #       # append curr accel
+    #       self.acceleration.append(accel_curr)
+    #       # compute current velocity based on previous velocity and current accel.
+    #       velocity_curr = self.Euler_step(self.velocity[-1], self.acceleration[-1])
+    #       self.velocity.append(velocity_curr)
+
+    #       # compute current angles based on previous angles and velocity.
+    #       angles_curr = self.Euler_step(self.angles[-1], self.velocity[-1])
+    #       self.angles.append(angles_curr)
+
+        
+    #   # for every timestep we conclude with forward kinematics given current angles
+    #   #print("angles: " , self.angles[-1].shape)
+    #       # careful of contiguous!
+    #   mean_tensor = self.FW_kin_2D(self.angles[-1].contiguous().view(
+    #             self.batch_size, self.num_particles, self.dim_latents))
+      
+    #   #print("mean of dist: " , mean_tensor.shape)
+          
+    #   return aesmc.state.set_batch_shape_mode(
+    #   torch.distributions.Normal(mean_tensor, self.scale),
+    #   aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+    
+    # 02/11 commented all the below. please keep building that up. just
+    # quickly checking how does the full model perform.
+    # def forward(self, latents = None, time = None, previous_observations = None):
+        
+    #     # time 0
+    #     # use initial angles to explain data
+    #     # one could optimize these angles and velocities to start from a good initial point
+    #     #print("latent: " , latents[-1].shape)
+            
+    #     #print('itreration 0: length of latent[-1] = ', len(latents))
+    #     #print('itreration 0: shape of latents[-1] = ', latents[-1].shape)
+
+    #     # compute dimensions 
+    #     if time == 0:
+    #         self.batch_size = latents[-1].shape[0]
+    #         self.num_particles = latents[-1].shape[1]
+    #         self.dim_latents = latents[-1].shape[2]
+    #         # use the line below just to make sure that things are running
+    #         # with a fixed inertia tensor
+    #         self.fixed_D = torch.tensor([[1,2],[0.5,3]]).reshape(1,2,2).repeat(self.batch_size*
+    #                                                         self.num_particles,1,1)
+            
+    #         # set lists at the first time step and then append values
+    #         self.angles = [] # append inits
+    #         self.velocity = [] # append inits.
+    #         self.acceleration = [] # append just in the next time step
+    #         self.print_test = False
+
+            
+    #     if self.print_test:
+    #         print(time)
+        
+    #     # keep locally defining those zero vectors
+    #     init_angles = torch.zeros_like(latents[-1]).view(-1,2)
+    #     init_velocity = torch.zeros_like(latents[-1]).view(-1,2)
+        
+    #     # compute acccel, rhs for current time. use inits and sampled torque.
+    #     accel_curr = self.Newton_2nd(
+    #         latents[-1].contiguous().view( # squeeze latent
+    #                                 self.batch_size*self.num_particles, 2, 1), # self.batch_size*self.num_particles ,2, 1,
+    #                                 self.D(init_angles[:,1]),
+    #         #self.D(init_angles[:,1]), # a fixed inertia tens, works
+    #         #self.fixed_D, # that works as well
+    #         # torch.eye(2).reshape(1,2,2).repeat(self.batch_size*
+    #         #                                                self.num_particles,1,1), # that works
+    #                                 0*self.h_vec(init_velocity[:,0], 
+    #                                             init_velocity[:,1], 
+    #                                             init_angles[:,1]), 
+    #                                 0*self.c_vec(init_angles[:,0], 
+    #                                             init_angles[:,1])
+    #                                 )
+        
+    #     self.acceleration.append(accel_curr) # append first value
+        
+    #     # note: just pushing latents through FW-KIN works.
+    #     # mean_tensor = self.FW_kin_2D(latents[-1].contiguous().view(
+    #     #   self.batch_size, self.num_particles, self.dim_latents)) 
+        
+    #     # keep this below until you solve. this didn't work
+    #     mean_tensor = self.FW_kin_2D(self.acceleration[-1].contiguous().view(
+    #               self.batch_size, self.num_particles, self.dim_latents))
+        
+    # #     #print("mean of dist: " , mean_tensor.shape)
+            
+    #     return aesmc.state.set_batch_shape_mode(
+    #     torch.distributions.Normal(mean_tensor, self.scale),
+    #     aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+        
+    #         # 02/10 works, keep using later to get the output of accel or velocity
+    #     # return aesmc.state.set_batch_shape_mode( 
+    #     # torch.distributions.Normal(self.acceleration[-1].contiguous().view(
+    #     #           self.batch_size, self.num_particles, self.dim_latents), self.scale),
+    #     # aesmc.state.BatchShapeMode.FULLY_EXPANDED)
             
 class Bootstrap_Proposal(nn.Module):
     """This proposal is proportional to the transition.
@@ -347,13 +481,95 @@ class Bootstrap_Proposal(nn.Module):
             return aesmc.state.set_batch_shape_mode(
             torch.distributions.Normal(
                 self.mult_t * previous_latents[-1], self.scale_t),
-            aesmc.state.BatchShapeMode.FULLY_EXPANDED)           
+            aesmc.state.BatchShapeMode.FULLY_EXPANDED)   
+
+class Proposal(nn.Module):
+    """This Proposal uses a linear FF mapping between (1) observations[0] -> mu[0]
+    and {previous_latents[t-1], observations[t]} -> mu[t].
+    The weights and biases of each mapping could be learned. 
+    Args:
+        scale_0, scale_t: scalars for __init__ method
+        previous_latents: list of len num_timesteps, each entry is 
+            torch.tensor([batch_size, num_particles, dim_latents])
+        time: integer
+        observations: list of len num_timesteps. each entry is a
+        torch.tensor([batch_size, dim_observations]
+    Returns:
+        torch.distributions.Normal object. 
+        at time=0, torch.tensor([batch_size, dim_latents]) 
+        and at time!=0, torch.tensor([batch_size, num_particles, dim_latents])"""
+    
+    def __init__(self, scale_0, scale_t):
+        super(Proposal, self).__init__()
+        self.scale_0 = scale_0
+        self.scale_t = scale_t
+        self.lin_0 = nn.Sequential(
+                        nn.Linear(6, 2),
+                        nn.ReLU()) # observations[0] -> mu[0]
+        self.lin_t = nn.Sequential(
+                        nn.Linear(14, 2), # SHOULD BE 6,2 IN EULER
+                        nn.ReLU()) # {previous_latents[t-1], observations[t-1], observations[t]} -> mu[t]
+
+    def forward(self, previous_latents=None, time=None, observations=None):
+        if time == 0:
+            return aesmc.state.set_batch_shape_mode(
+                torch.distributions.Normal(
+                    loc=self.lin_0(observations[0]),
+                    scale=self.scale_0),
+                aesmc.state.BatchShapeMode.BATCH_EXPANDED)
+        else:
+            if time == 1:
+                self.batch_size, self.num_particles, self.dim_latents = previous_latents[-1].shape
+            expanded_obs_prev = aesmc.state.expand_observation(observations[time-1], self.num_particles) # expand current obs
+            expanded_obs = aesmc.state.expand_observation(observations[time], self.num_particles) # expand current obs
+            # concat previous latents with current expanded observation. then squeeze to batch_expanded mode
+            # i.e., [batch_size*num_particles, dim_latent+dim_observation]
+            # to apply a linear layer.
+            concat_squeezed = torch.cat([previous_latents[-1],
+                                         expanded_obs_prev,
+                        expanded_obs
+                        ], 
+                        dim=2).view(-1, previous_latents[-1].shape[2]+
+                                    expanded_obs.shape[2] +
+                                    expanded_obs_prev.shape[2] )
+            activ = self.lin_t(concat_squeezed)
+            mu_t = activ.view(self.batch_size, self.num_particles, self.dim_latents)
+            
+            return aesmc.state.set_batch_shape_mode(
+                torch.distributions.Normal(
+                    loc=mu_t,
+                    scale=self.scale_t),
+                aesmc.state.BatchShapeMode.FULLY_EXPANDED)        
+
+class TrainingStats(object):
+    def __init__(self, L1_true, L2_true,
+                 num_timesteps,
+                 logging_interval=100):
+        self.L1_true = L1_true
+        self.L2_true = L2_true
+        self.logging_interval = logging_interval
+        self.curr_L1 = []
+        self.curr_L2 = []
+        self.loss = []
+  
+    def __call__(self, epoch_idx, epoch_iteration_idx, loss, initial,
+                 transition, emission, proposal):
+        if epoch_iteration_idx % self.logging_interval == 0:
+            print('Iteration {}: Loss = {}'.format(epoch_iteration_idx, loss))
+            self.curr_L1.append(emission.L1.item())
+            self.curr_L2.append(emission.L2.item()) # seemed to be better than detach().numpy()
+            self.loss.append(loss)
+            # print(np.round(np.linalg.norm(
+            #     np.array([emission.L1.detach().numpy(),emission.L2.detach().numpy()])-
+            #     np.array([self.L1_true, self.L2_true])),2))
+
     
 # TESTS:===================
 
 test = False
 if test:
-    
+    # ToDo: keep exploring the dimensions of things and how my reshape effects
+    # the forward kin function, etc.
     batch_size = 10
     num_particles = 100
     
@@ -435,7 +651,7 @@ if test:
     np.diff(emission.forward(fake_prev_latents, 0).detach().numpy())
     diffs = np.diff(emission.angles[-1].detach().numpy(),axis=0)
     (diffs==0).all() # look at row 321. it is different from prev and next row
-    # seems to make sense
+    # seems to make sense. it goes- first batch and 100 particles, ... third batch and 100 particles
     regular_reshape = fake_prev_latents[-1].view(batch_size*num_particles,2).detach().numpy()
     # just 321 should be different
     emission.velocity[-1]
@@ -470,6 +686,8 @@ if test:
                 previous_observations=None), batch_size, 1)
     samp.shape
     latents = aesmc.state.sample(transition, batch_size, num_particles)
+    
+    eye_tens = torch.eye(2).reshape(1,2,2).repeat(self.batch_size,1,1)
 
     def squeeze_num_particles(value):
         if isinstance(value, dict):
@@ -479,6 +697,12 @@ if test:
         
     tuple(map(lambda values: list(map(squeeze_num_particles, values)),
                  [latents, observations]))
+    
+    list_test = []
+    list_test.append(2)
+    for i in range(3):
+        list_test.append(list_test[-1]+3)
+    
 # OLDER STUFF BELOW =======================
 
 # def FW_kin_2D(L1, L2, angles):
@@ -774,6 +998,98 @@ if test:
           
     #     # for every timestep we conclude with forward kinematics given current angles
         
+    #     #print("angles: " , self.angles[-1].shape)
+    #         # careful of contiguous!
+    #     mean_tensor = self.FW_kin_2D(self.angles[-1].contiguous().view(
+    #              self.batch_size, self.num_particles, self.dim_latents))
+        
+    #     #print("mean of dist: " , mean_tensor.shape)
+            
+    #     return aesmc.state.set_batch_shape_mode(
+    #     torch.distributions.Normal(mean_tensor, self.scale),
+    #     aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+    
+    # #== below see the forward method above but with changes that include
+    # # a different indexing for the euler simulation, s.t. we use the current torques
+    #  def forward(self, latents = None, time = None, previous_observations = None):
+        
+    #     # time 0
+    #     # use initial angles to explain data
+    #     # one could optimize these angles and velocities to start from a good initial point
+    #     #print("latent: " , latents[-1].shape)
+    #     if time == 0:
+            
+    #         print('itreration 0: length of latent[-1] = ', len(latents))
+    #         print('itreration 0: shape of latents[-1] = ', latents[-1].shape)
+
+    #         # compute dimensions 
+    #         self.batch_size = latents[-1].shape[0]
+    #         self.num_particles = latents[-1].shape[1]
+    #         self.dim_latents = latents[-1].shape[2]
+            
+            
+    #         # set lists at the first time step and then append values
+    #         self.angles = [] # append inits
+    #         self.velocity = [] # append inits.
+    #         self.acceleration = [] # append just in the next time step
+            
+    #         init_angles = torch.zeros_like(latents[-1]).view(-1,2)
+    #         init_velocity = torch.zeros_like(latents[-1]).view(-1,2)
+    #         # compute acccel, rhs for current time. use inits and sampled torque.
+    #         accel_curr = self.Newton_2nd(
+    #             latents[-1].contiguous().view( # squeezing. ToDo: not sure about line.
+    #                                     self.batch_size*self.num_particles, 2, 1), # self.batch_size*self.num_particles ,2, 1),
+    #                                     self.D(init_angles[:,1]), 
+    #                                     self.h_vec(init_velocity[:,0], 
+    #                                                init_velocity[:,1], 
+    #                                                init_angles[:,1]), 
+    #                                     self.c_vec(init_angles[:,0], 
+    #                                                init_angles[:,1]))
+            
+    #         self.acceleration.append(accel_curr) # append first value
+
+    #         # compute current velocity using current accel (just appended) and init angle.
+    #         velocity_curr = self.Euler_step(init_velocity, self.acceleration[-1])
+    #         self.velocity.append(velocity_curr)
+
+    #         # compute current angles using current velocity (just appended) and init angle.
+    #         angles_curr = self.Euler_step(init_angles, self.velocity[-1])
+    #         self.angles.append(angles_curr)
+            
+
+    #     else: # time not zero
+    #         # accel_prev = Newton_2nd(torques, computed_D, computed_c_vec, computed_h_vec)
+    #         # ToDo: check if they have in aesmc a better way to squeeze
+    #         # compute previous acceleration based on previous torques, angles and velocity.
+    #         # note: using latents[-2] because I assume that since then, 
+    #         # we drew the current set of latents in the proposal.
+    #         print('itreration i: length of latent[-1] = ', len(latents))
+    #         print('itreration i: shape of latents[-1] = ', latents[-1].shape)
+    #         print('regular latents: ', latents[-2].shape)
+    #         print('contig latents: ',latents[-2].contiguous().shape)
+    #         print((latents[-2] == latents[-2].contiguous()).detach().numpy().all())
+    #         # ToDo: the part below needs extra caution:
+    #         accel_curr = self.Newton_2nd(
+    #             latents[-1].contiguous().view( # squeezing. ToDo: not sure about line.
+    #                                     self.batch_size*self.num_particles, 2, 1), # self.batch_size*self.num_particles ,2, 1),
+    #                                     self.D(self.angles[-1][:,1]), 
+    #                                     self.h_vec(self.velocity[-1][:,0], 
+    #                                                self.velocity[-1][:,1], 
+    #                                                self.angles[-1][:,1]), 
+    #                                     self.c_vec(self.angles[-1][:,0], 
+    #                                                self.angles[-1][:,1]))
+    #         # append curr accel
+    #         self.acceleration.append(accel_curr)
+    #         # compute current velocity based on previous velocity and current accel.
+    #         velocity_curr = self.Euler_step(self.velocity[-1], self.acceleration[-1])
+    #         self.velocity.append(velocity_curr)
+
+    #         # compute current angles based on previous angles and velocity.
+    #         angles_curr = self.Euler_step(self.angles[-1], self.velocity[-1])
+    #         self.angles.append(angles_curr)
+
+          
+    #     # for every timestep we conclude with forward kinematics given current angles
     #     #print("angles: " , self.angles[-1].shape)
     #         # careful of contiguous!
     #     mean_tensor = self.FW_kin_2D(self.angles[-1].contiguous().view(

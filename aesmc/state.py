@@ -148,6 +148,9 @@ def log_prob(distribution, value):
                 'Incompatible distribution.batch_shape ({}) and '
                 'value.shape ({}).'.format(
                     distribution.batch_shape, value.shape))
+        # Dan 02/26/20: replace nan values by some negative integer
+        # this is necessary for degenerate distributions where logprob=nan
+        logp[torch.isnan(logp)] = -200
         return torch.sum(logp.view(value.size(0), value.size(1), -1), dim=2)
     else:
         raise AttributeError(

@@ -1,8 +1,9 @@
+# Dan 02/26 - we want a local import, not from the package.
 from . import inference
 from . import math
 from . import state
-import torch
 
+import torch
 
 def empirical_expectation(value, log_weight, f):
     """Empirical expectation.
