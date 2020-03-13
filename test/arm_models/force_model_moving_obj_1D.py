@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Feb 26 10:58:48 2020
+Created on Thu Feb 27 17:21:56 2020
 
 @author: danbiderman
 """
@@ -12,55 +12,62 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 
-class Initial: # distribution for latents at t=0
+class Initial: # could be made specific for each variable, or learned 
+    '''distribution for latents at t=0, i.i.d draws from normal(loc,scale)'''
     def __init__(self, loc, scale):
         self.loc = loc
         self.scale = scale
 
     def __call__(self): 
-        return torch.distributions.Normal(self.loc, self.scale)
+            return torch.distributions.MultivariateNormal(
+            torch.ones(3)*self.loc, torch.eye(3)*(self.scale**2))
 
-
-class Transition(nn.Module): # 
-    def __init__(self, dt, scale):
+class Transition(nn.Module): 
+    '''x \in R^3 := [f,x,\dot{x}]^T'''
+    def __init__(self, m, dt, scale_force, scale_aux):
         super(Transition, self).__init__()
+        self.m = m
         self.dt = dt
-        self.scale = scale # could be learned in the future
-        self.A = torch.tensor([[1, self.dt],[0,1]], 
-                              requires_grad = False)
-        self.G = torch.tensor([[0.5*(self.dt**2)], [self.dt]], 
-                              requires_grad = False) * self.scale # this is for 2d case
+        self.scale_force = scale_force # std scale. square for variance.
+        self.scale_aux = scale_aux # std scale. scale aux**2 should be smaller
+        # than (self.dt**2)*(self.scale_force**2)
+        self.diag_mat = torch.diag(torch.tensor([(self.dt**2)*
+                                                 (self.scale_force**2), 
+                                                 self.scale_aux**2, 
+                                                 self.scale_aux**2]))
 
-        
     def forward(self, previous_latents=None, time=None,
                 previous_observations=None):
-        
         batch_size = previous_latents[-1].shape[0]
         num_particles = previous_latents[-1].shape[1]
+        diag_expanded = self.diag_mat.expand(batch_size,num_particles,3,3)
         
-        # compute Fx_{k-1}
-        mean_fully_expanded = self.A.expand(batch_size*num_particles, 2,2).matmul(
-                            previous_latents[-1].view(
-                                -1,2,1)).view(
-                                    batch_size,num_particles,-1)
-        # return distribution x_k = Ax_{k-1} + w_k, w_k \sim N(0,GG^T*scale^2)
+        # compute a(x_{k-1}) of shape (batch_size*num_particles,3)
+        # save room
+        ax = torch.zeros([batch_size, num_particles, 3])
+        ax[:,:,1] = previous_latents[-1][:,:,2]
+        ax[:,:,2] = previous_latents[-1][:,:,0] * (1.0/self.m)
+        # deterministic first order Euler integration
+        mean_fully_expanded = previous_latents[-1] + self.dt * ax
+
+        # return distribution
         return aesmc.state.set_batch_shape_mode(
-            torch.distributions.lowrank_multivariate_normal.\
-                LowRankMultivariateNormal(mean_fully_expanded, #torch.tensor([4,7], dtype = torch.float), 
-                              self.G, torch.zeros(2)),
+            torch.distributions.MultivariateNormal(
+            mean_fully_expanded, diag_expanded),
             aesmc.state.BatchShapeMode.FULLY_EXPANDED)
 
 class Emission(nn.Module):
-    """This Emission just picks the first element of latents and adds noise"""
+    """This Emission just picks x (latents[-1][:,:,1]), and adds noise"""
     def __init__(self, scale):
         super(Emission, self).__init__()
         self.scale = scale # should be nn.Parameter in the future
 
     def forward(self, latents=None, time=None, previous_observations=None):
         # pick first element
-        mean_tensor = latents[-1][:,:,0].view(
+        mean_tensor = latents[-1][:,:,1].view(
             latents[-1].shape[0], latents[-1].shape[1], 1)
 
         return aesmc.state.set_batch_shape_mode(
@@ -72,7 +79,7 @@ class Bootstrap_Proposal(nn.Module):
     """This proposal is proportional to the transition.
     at step zero, the proposal should be set to the initial distribution
     at step t, the proposal should be set to the transition
-    Args:
+    Args: ToDo: update
         scale_0, scale_t: scalars for __init__ method
         previous_latents: list of len num_timesteps, each entry is 
             torch.tensor([batch_size, num_particles, dim_latents])
@@ -81,39 +88,59 @@ class Bootstrap_Proposal(nn.Module):
         torch.distributions.Normal object. 
         at time=0, torch.tensor([batch_size, dim_latents]) 
         and at time!=0, torch.tensor([batch_size, num_particles, dim_latents])"""
-    def __init__(self, dt, scale_0, mu_0, scale_t):
+    def __init__(self, m, dt, scale_0, mu_0, scale_force, scale_aux):
         super(Bootstrap_Proposal, self).__init__()
+        self.m = m
         self.dt = dt
-        self.scale_0 = scale_0
-        self.mu_0 = mu_0
-        self.scale_t = scale_t
-        self.A = torch.tensor([[1, self.dt],[0,1]], 
-                              requires_grad = False)
-        self.G = torch.tensor([[0.5*(self.dt**2)], [self.dt]], 
-                              requires_grad = False) * self.scale_t # this is for 2d case
-
+        self.cov_0 = torch.eye(3)*(scale_0**2)
+        self.mu_0 = torch.ones(3)*mu_0
+        self.scale_force = scale_force # std scale. square for variance.
+        self.scale_aux = scale_aux # std scale. scale aux**2 should be smaller
+        # than (self.dt**2)*(self.scale_force**2)
+        self.diag_mat = torch.diag(torch.tensor([(self.dt**2)*
+                                                 (self.scale_force**2), 
+                                                 self.scale_aux**2, 
+                                                 self.scale_aux**2]))
+        
     def forward(self, previous_latents=None, time=None, observations=None):
         
-        if time == 0:
-            return aesmc.state.set_batch_shape_mode(
-                torch.distributions.Normal(
-                    loc=self.mu_0.expand(observations[-1].shape[0],2), # for a 2d lat
-                    scale=self.scale_0),
+        #if time == 0: 
+            # # initial. Note: hand coded. fully expanded for 1000.
+            # # version below works equally well. 
+            # return aesmc.state.set_batch_shape_mode(
+            #     torch.distributions.MultivariateNormal(
+            #             loc = self.mu_0.expand(observations[-1].shape[0],1000,3), 
+            #             covariance_matrix = self.cov_0.expand(
+            #             observations[-1].shape[0], 1000, 3, 3)),
+            #     aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+        
+        if time == 0: # initial. older version that worked.
+            return aesmc.state.set_batch_shape_mode( # batch-expanded dist.
+                torch.distributions.MultivariateNormal(
+                        loc = self.mu_0.expand(observations[-1].shape[0],3), 
+                        covariance_matrix = self.cov_0.expand(
+                        observations[-1].shape[0], 3, 3)),
                 aesmc.state.BatchShapeMode.BATCH_EXPANDED)
-        else:
+ 
+        else: # transition
             batch_size = previous_latents[-1].shape[0]
             num_particles = previous_latents[-1].shape[1]
-            # compute Ax_{k-1}
-            mean_fully_expanded = self.A.expand(batch_size*num_particles, 2,2).matmul(
-                                previous_latents[-1].view(
-                                    -1,2,1)).view(
-                                        batch_size,num_particles,-1)
-            # return distribution x_k = Ax_{k-1} + w_k, w_k \sim N(0,GG^T*scale^2)
+            diag_expanded = self.diag_mat.expand(batch_size,num_particles,3,3)
+            
+            # compute a(x_{k-1}) of shape (batch_size*num_particles,3)
+            # save room
+            ax = torch.zeros([batch_size, num_particles, 3])
+            ax[:,:,1] = previous_latents[-1][:,:,2]
+            ax[:,:,2] = previous_latents[-1][:,:,0] * (1.0/self.m)
+            # deterministic first order Euler integration
+            mean_fully_expanded = previous_latents[-1] + self.dt * ax
+            
+            # return distribution
             return aesmc.state.set_batch_shape_mode(
-                torch.distributions.lowrank_multivariate_normal.\
-                    LowRankMultivariateNormal(mean_fully_expanded, #torch.tensor([4,7], dtype = torch.float), 
-                                  self.G, torch.zeros(2)),
+                torch.distributions.MultivariateNormal(
+                mean_fully_expanded, diag_expanded),
                 aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+
 
 class Proposal(nn.Module):
     """This Proposal uses a linear FF mapping between (1) observations[0] -> mu[0]
@@ -195,17 +222,84 @@ class TrainingStats(object):
             #     np.array([emission.L1.detach().numpy(),emission.L2.detach().numpy()])-
             #     np.array([self.L1_true, self.L2_true])),2))
             
-#%% tests
-
+def sim_data(dt, num_timepoints, m, 
+             sin_amp, sin_omega, 
+             cos_amp, cos_omega, 
+             obs_noise_scale, plot):
+    t = np.linspace(start = 0, 
+                    stop = (num_timepoints-1)*dt, 
+                    num = num_timepoints)
+    
+    force = sin_amp * np.sin(sin_omega*t) + \
+            cos_amp * np.cos(cos_omega*t +0.01)
+    
+    force = force*t
+            
+    #force = np.concatenate([-0.1*np.ones(20),0.15*np.ones(40), -0.2*np.ones(40)])
+    
+    x_vec = np.zeros((2,num_timepoints)) # [x(t), xdot(t)]^T
+    
+    # Euler
+    for i in range(1,num_timepoints):
+        ax = np.array([x_vec[1,i-1],force[i-1]/m])
+        x_vec[:,i] = x_vec[:,i-1] + dt*ax
+    
+    # noisy obs is position
+    obs = x_vec[0,:] +  np.random.normal(0, obs_noise_scale, num_timepoints)
+    
+    latent_arr = np.zeros((3, num_timepoints))
+    latent_arr[0,:] = force
+    latent_arr[1:, :] = x_vec
+    
+    latent_list = []
+    obs_list = []
+    for i in range(num_timepoints):
+        latent_list.append(torch.tensor(latent_arr[:,i].reshape(1,3),
+                                        dtype = torch.float))
+        obs_list.append(torch.tensor(obs[i].reshape(1,1),
+                                     dtype = torch.float))
+        
+    if plot:
+        plt.plot(force, label = 'f')
+        plt.plot(x_vec[0,:], label = 'coord')
+        plt.plot(x_vec[1,:], label = 'velocity')
+        plt.scatter(np.arange(num_timepoints), obs, label = 'obs', marker = 'x')
+        plt.legend();
+        
+    return latent_list, obs_list           
+            
 test = False
 if test:
     # ToDo: keep exploring the dimensions of things and how my reshape effects
     # the forward kin function, etc.
+    
+    
     batch_size = 10
     num_particles = 100
     dt = 0.03
     scale=1
-    fake_prev_latents = [torch.tensor([3.0, 7.0]).expand(batch_size, num_particles, 2)]
+    
+    initial = Initial(0.7, 0.5)
+    initial().sample()
+    diag_mat = torch.diag(torch.tensor([0.03, 0.01, 0.01]))
+    diag_expanded = diag_mat.expand(batch_size,num_particles,3,3)
+    fake_prev_latents = [torch.tensor([3.0, 7.0, 1.2]).expand(batch_size, num_particles, 3)]
+    fake_prev_latents[-1].shape
+    multi_trans_dist = torch.distributions.MultivariateNormal(
+        fake_prev_latents[-1], diag_expanded)
+    print(multi_trans_dist)
+    val = multi_trans_dist.sample()
+    val.shape
+    print(val[2,4,:])
+    lp = multi_trans_dist.log_prob(val)
+    print(lp[:2,:3])
+    
+    ax = torch.zeros([batch_size, num_particles, 3])
+    ax[:,:,1] = fake_prev_latents[-1][:,:,2]
+    ax[:,:,2] = fake_prev_latents[-1][:,:,0] * (1.0/2)
+    print(ax[3, 0, :]) # should be 0, 1.2, 1.5
+    # deterministic first order Euler integration
+    mean_fully_expanded = fake_prev_latents[-1] + dt * ax
     #fake_prev_latents = [torch.zeros(batch_size, num_particles,2)] # list element 1
     fake_prev_latents[-1].view(-1,2).shape
     A = torch.tensor([[1, dt],[0,1]], requires_grad = False)
@@ -387,18 +481,11 @@ if test:
     latents = aesmc.state.sample(transition, batch_size, num_particles)
     
     eye_tens = torch.eye(2).reshape(1,2,2).repeat(self.batch_size,1,1)
-
-    def squeeze_num_particles(value):
-        if isinstance(value, dict):
-            return {k: squeeze_num_particles(v) for k, v in value.items()}
-        else:
-            return value.squeeze(1)
         
-    tuple(map(lambda values: list(map(squeeze_num_particles, values)),
-                 [latents, observations]))
-    
-    list_test = []
-    list_test.append(2)
-    for i in range(3):
-        list_test.append(list_test[-1]+3)
-    
+            
+            
+            
+            
+            
+            
+        

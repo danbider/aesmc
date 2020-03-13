@@ -52,3 +52,54 @@ def coords_from_params_mat(q1, q2, a1, a2):
     y[:,1] = a1*np.sin(q1)
     y[:,2] = a2*np.sin(q1+q2) + a1*np.sin(q1)
     return x,y
+
+def plot_posterior_trace(post_mean = None, post_var = None, data_vec = None, 
+                         alpha = 1.0, plot_legend=True, 
+                         plot_uncertainty=False, plot_true_data=False,legends_list = None, 
+                         legend_loc = "lower left", title = None, 
+                         xlabel = 'Time', ylabel = 'Amplitude', fig_fullname = None, 
+                         ax = None):
+    '''a function that plots a time series signal, optionally a variance est,
+    and with ground-truth or data signal. 
+    Args: 
+        post_mean = a 1D time series, numpy.array of shape (num_timesteps,)
+        post_var = a 1D time series of some empirical var, or std, numpy.array of shape (num_timesteps,)
+        data_vec = another 1D time series, numpy.array of shape (num_timesteps,)
+        alpha = float in [0,1], for the optional fill_between function for post vars
+    Returns: a figure on ax
+    '''
+    ax = ax or plt.gca()
+    
+    p1, = ax.plot(post_mean, color = "black", zorder=2)
+    if plot_uncertainty:
+        p2 = ax.fill_between(np.arange(len(post_mean)), post_mean - post_var,
+                         post_mean + post_var, color='gray', alpha=alpha, zorder=3)
+    if plot_true_data:
+        p3, = ax.plot(data_vec, color = 'red', zorder=1)
+    
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    #plt.yticks(ticks = [0, .5, 1, 1.5], fontsize=14)
+    #ax.set_yticks(ticks = input_ticks)
+    #ax.tick_params(axis='y', labelsize= 12)
+    #ax.set_yticklabels(input_labels)
+    #ax.set_xticks([0,150, 300, 450])
+    #ax.tick_params(axis='x', labelsize= 12)
+
+    if plot_uncertainty:
+        model_obj = (p1, p2)
+        #legends = ["Arm Model (90% CI)", "DeepLabCut"]
+
+    else:
+        model_obj = (p1)
+        #legends = ["Arm Model", "DeepLabCut"]
+    if plot_legend == True:
+        if plot_true_data == False:
+            legends_list = [legends_list[0]]
+            ax.legend([model_obj], legends_list, loc = legend_loc, 
+                    frameon=False)
+        else:
+            ax.legend([model_obj, p3], legends_list, loc = legend_loc, 
+                        frameon=False)
+    return ax
