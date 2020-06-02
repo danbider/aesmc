@@ -70,7 +70,7 @@ def plot_posterior_trace(post_mean = None, post_var = None, data_vec = None,
     '''
     ax = ax or plt.gca()
     
-    p1, = ax.plot(post_mean, color = "black", zorder=2)
+    p1, = ax.plot(post_mean, color = "black", linestyle = "dashdot", zorder=2)
     if plot_uncertainty:
         p2 = ax.fill_between(np.arange(len(post_mean)), post_mean - post_var,
                          post_mean + post_var, color='gray', alpha=alpha, zorder=3)

@@ -114,7 +114,7 @@ class Bootstrap_Proposal(nn.Module):
             #             observations[-1].shape[0], 1000, 3, 3)),
             #     aesmc.state.BatchShapeMode.FULLY_EXPANDED)
         
-        if time == 0: # initial. older version that worked.
+        if time == 0: # initial. older version that works.
             return aesmc.state.set_batch_shape_mode( # batch-expanded dist.
                 torch.distributions.MultivariateNormal(
                         loc = self.mu_0.expand(observations[-1].shape[0],3), 

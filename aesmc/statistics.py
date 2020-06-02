@@ -107,7 +107,7 @@ def ess(log_weight):
 
 # TODO: test
 def sample_from_prior(initial, transition, emission, num_timesteps,
-                      batch_size):
+                      batch_size, repeat_data=False):
     """Samples latents and observations from prior
 
     Args:
@@ -132,6 +132,7 @@ def sample_from_prior(initial, transition, emission, num_timesteps,
             Returns: torch.distributions.Distribution or a dict thereof
         num_timesteps: int
         batch_size: int
+        repeat_data: bool, Dan added this to repeat data across batches.
 
     Returns:
         latents: list of tensors (or dict thereof) [batch_size] of length
@@ -141,17 +142,35 @@ def sample_from_prior(initial, transition, emission, num_timesteps,
 
     latents = []
     observations = []
-
-    for time in range(num_timesteps):
-        if time == 0:
-            latents.append(state.sample(initial(), batch_size, 1))
-        else:
-            latents.append(state.sample(transition(
-                previous_latents=latents, time=time,
+    
+    if repeat_data:
+        print('repeating data in batch.')
+        for time in range(num_timesteps):
+            if time == 0:
+                latents.append(state.sample(initial(), 1, 1)) # .expand(
+                    # batch_size, 1, -1) # immediately after state sample
+            else:
+                latents.append(state.sample(transition(
+                    previous_latents=latents, time=time,
+                    previous_observations=observations[:time]), 1, 1))
+            observations.append(state.sample(emission(
+                latents=latents, time=time,
+                previous_observations=observations[:time]), 1, 1))
+        for i in range(len(latents)):
+            latents[i] = latents[i].expand(batch_size, 1, -1)
+            observations[i] = observations[i].expand(batch_size, 1, -1)
+    else: 
+        print('each batch contains different data.')
+        for time in range(num_timesteps):
+            if time == 0:
+                latents.append(state.sample(initial(), batch_size, 1))
+            else:
+                latents.append(state.sample(transition(
+                    previous_latents=latents, time=time,
+                    previous_observations=observations[:time]), batch_size, 1))
+            observations.append(state.sample(emission(
+                latents=latents, time=time,
                 previous_observations=observations[:time]), batch_size, 1))
-        observations.append(state.sample(emission(
-            latents=latents, time=time,
-            previous_observations=observations[:time]), batch_size, 1))
 
     def squeeze_num_particles(value):
         if isinstance(value, dict):

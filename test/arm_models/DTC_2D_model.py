@@ -204,7 +204,7 @@ class Emission(nn.Module):
         Returns:
             torch.Tensor([batch_size * num_particles, 2]). Should be a length-2 column vector
             if we have two angles -- matching the angular velocity and angle vectors.
-            ToDo: make sore that this tensor is logged when this function is called.
+            ToDo: make sure that this tensor is logged when this function is called.
             potentially use wrapper that logs it inside emission. 
             '''
         D_inv_mat_tens = torch.inverse(D_mat_tens)
