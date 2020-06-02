@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
     ''''the deterministics dynamics of the arm model. 
@@ -21,6 +22,7 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
                  g, include_gravity_fictitious = True, 
                  transform_torques=False, learn_static=False):
         super(PlanarArmDyn, self).__init__()
+
         self.dt = dt
         # self.M1 = inits_dict["M1"] # upper arm mass
         # self.M2 = inits_dict["M2"] # forearm mass
@@ -34,7 +36,9 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
         self.dim_latents = 6
         self.include_gravity_fictitious = include_gravity_fictitious
         self.transform_torques = transform_torques
-        self.A = torch.tensor((-0.25)*np.eye(2), dtype = torch.double) # add it as a parameter and input to init.
+        self.A = torch.tensor((-0.25)*np.eye(2), 
+                              dtype = torch.double,
+                              device = device) # add it as a parameter and input to init.
         # ToDo: could have instead of A, dim_intermediate = 10
         #  self.lin_t = nn.Sequential(
         #               nn.Linear(2, dim_intermediate), 
@@ -51,7 +55,9 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
             torch.tensor [batch_size*num_particles, 2, 2]. These dimensions are
             important [large_batch_size, [squared mat]] 
             because they allow us to later invert D'''
-        D_tensor = torch.zeros(t2.shape[0], 2, 2, dtype = torch.double)
+        D_tensor = torch.zeros(t2.shape[0], 2, 2, 
+                               dtype = torch.double,
+                               device = device)
         D_tensor[:,0,0] = self.L1**2*self.M1/3 + self.M2*(3*self.L1**2 + 
                             3*self.L1*self.L2*torch.cos(t2) + self.L2**2)/3
         D_tensor[:,0,1] = self.L2*self.M2*(3*self.L1*torch.cos(t2) + 2*self.L2)/6
@@ -73,7 +79,8 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
             '''
         assert(dt1.shape[0] == dt2.shape[0] & dt2.shape[0] == t2.shape[0])
         # note: we are always assuming batched processing.
-        h_vec_tensor = torch.zeros(t2.shape[0], 2, 1) # output shape
+        h_vec_tensor = torch.zeros(t2.shape[0], 2, 1,
+                                   device = device) # output shape
         h_vec_tensor[:,0,0] = -self.L1*self.L2*self.M2*dt2*(2*dt1 + dt2)*torch.sin(t2)/2
         h_vec_tensor[:,1,0] = self.L1*self.L2*self.M2*dt1**2*torch.sin(t2)/2
     
@@ -93,7 +100,7 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
         assert(t1.shape[0] == t2.shape[0])
         # note: we are always assuming batched processing.
     
-        c_vec_tensor = torch.zeros(t2.shape[0], 2, 1) # output shape
+        c_vec_tensor = torch.zeros(t2.shape[0], 2, 1, device = device) # output shape
         c_vec_tensor[:,0,0] = self.L1*self.M1*self.g*torch.cos(t1)/2 + \
                 self.M2*self.g*(2*self.L1*torch.cos(t1) + \
                 self.L2*torch.cos(t1 + t2))/2
@@ -169,7 +176,9 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
         # compute a(x_{k-1}) of shape (batch_size*num_particles,6)
         ax = torch.zeros([batch_size, 
                           num_particles, 
-                          self.dim_latents], dtype = torch.double) # save room
+                          self.dim_latents], 
+                         dtype = torch.double,
+                         device = device) # save room
 
         ax[:,:,2] = previous_latents[-1][:,:,4] # \dot{theta}_1
         ax[:,:,3] = previous_latents[-1][:,:,5] # \dot{theta}_2
@@ -201,8 +210,8 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
                                       contiguous().view(batch_size*num_particles))
         else: # zero gravity and fictitious forces
             # a version that worked
-            c_vec = torch.zeros_like(torque_vec)
-            h_vec = torch.zeros_like(torque_vec)
+            c_vec = torch.zeros_like(torque_vec, device = device)
+            h_vec = torch.zeros_like(torque_vec, device = device)
         
         # compute accel using Netwon's second law
         accel = self.Newton_2nd(torque_vec, 
@@ -221,8 +230,8 @@ class Initial: # could be made specific for each variable, or learned
     # each batch properly?
     '''distribution for latents at t=0, i.i.d draws from normal(loc,scale)'''
     def __init__(self, loc, cov_mat):
-        self.loc = torch.tensor(loc, dtype = torch.double)
-        self.cov_mat = torch.tensor(cov_mat, dtype = torch.double)
+        self.loc = torch.tensor(loc, dtype = torch.double, device = device)
+        self.cov_mat = torch.tensor(cov_mat, dtype = torch.double, device = device)
 
     def __call__(self): 
             return aesmc.state.set_batch_shape_mode(
@@ -384,7 +393,7 @@ class Transition(nn.Module):
                                     [np.repeat((self.scale_force**2) *
                                                self.dt**2,2), 
                                      np.repeat(self.scale_aux**2,4)]
-                                    )))
+                                    ))).to(device)
         self.dim_latents = 6
     
     def forward(self, previous_latents=None, time=None,
@@ -420,7 +429,7 @@ class Transition_Velocity(nn.Module):
                                                ,2), 
                                      np.repeat((self.scale_accel**2) * 
                                                self.dt**2, 2)]
-                                    )))
+                                    ))).to(device)
         self.dim_latents = 4
     
     def forward(self, previous_latents=None, time=None,
@@ -433,7 +442,9 @@ class Transition_Velocity(nn.Module):
                     self.dim_latents,
                     self.dim_latents)
         
-        xdot = torch.zeros(batch_size, num_particles, self.dim_latents)
+        xdot = torch.zeros(batch_size, num_particles, 
+                           self.dim_latents,
+                           device = device)
         xdot[:,:,:2] = previous_latents[-1][:,:,2:]
         
         mean_fully_expanded = previous_latents[-1] + self.dt * xdot
@@ -448,8 +459,8 @@ class Emission_Linear(nn.Module):
     """y_t = Cx_{t} + v_t, v_t \sim N(0,R)"""
     def __init__(self, C, R):
         super(Emission_Linear, self).__init__()
-        self.C = torch.tensor(C) # emission mat. dim obs X dim latents
-        self.R = torch.tensor(R) # cov mat. dim obs X dim obs
+        self.C = torch.tensor(C, device = device) # emission mat. dim obs X dim latents
+        self.R = torch.tensor(R, device = device) # cov mat. dim obs X dim obs
         self.dim_latents = self.C.shape[1]
         self.dim_obs = self.C.shape[0]
         assert(self.C.shape[0] == self.R.shape[0])
@@ -483,7 +494,7 @@ class Emission(nn.Module):
     (latents[-1][:,:,1]), and adds noise. later will include 2D FW KIN """
     def __init__(self, inits_dict, cov_mat, theta_indices):
         super(Emission, self).__init__()
-        self.cov_mat = torch.tensor(cov_mat) # should be nn.Parameter in the future
+        self.cov_mat = torch.tensor(cov_mat, device = device) # should be nn.Parameter in the future
         self.L1 = inits_dict["L1"]
         self.L2 = inits_dict["L2"]
         self.theta_indices = theta_indices # should be a list, indicating which
@@ -499,8 +510,8 @@ class Emission(nn.Module):
                 coords: torch.tensor [batch_size, num_particles, n_obs_dim]'''
         coords = torch.stack(
             (
-            torch.zeros_like(angles[:,:,0]), # x_0
-            torch.zeros_like(angles[:,:,0]), # y_0
+            torch.zeros_like(angles[:,:,0], device=device), # x_0
+            torch.zeros_like(angles[:,:,0], device = device), # y_0
             self.L1*torch.cos(angles[:,:,0]), # x_1
             self.L1*torch.sin(angles[:,:,0]), # y_1
             self.L2*torch.cos(angles[:,:,0]+angles[:,:,1]) + 
