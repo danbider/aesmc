@@ -32,8 +32,6 @@ def train(dataloader, num_particles, algorithm, initial, transition, emission,
             if num_iterations_per_epoch is not None:
                 if epoch_iteration_idx == num_iterations_per_epoch:
                     break
-            if torch.cuda.is_available(): # added cuda support
-                observations.cuda()
             optimizer.zero_grad()
             loss = losses.get_loss(observations, num_particles, algorithm,
                                    initial, transition, emission, proposal)
