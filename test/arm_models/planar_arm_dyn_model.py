@@ -29,9 +29,9 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
         self.L2 = nn.Parameter(torch.Tensor([inits_dict["L2"]]).squeeze(), 
                                requires_grad = learn_static) # forearm length
         self.M1 = nn.Parameter(torch.Tensor([inits_dict["M1"]]).squeeze(), 
-                               requires_grad = False) # upper arm mass
+                               requires_grad = learn_static) # upper arm mass
         self.M2 = nn.Parameter(torch.Tensor([inits_dict["M2"]]).squeeze(), 
-                               requires_grad = False) # forearm mass
+                               requires_grad = learn_static) # forearm mass
         self.g = g # gravity constant
         self.dim_latents = 6
         self.include_gravity_fictitious = include_gravity_fictitious
@@ -856,17 +856,27 @@ class TrainingStats(object):
         self.logging_interval = logging_interval
         self.curr_params_list = [] 
         self.loss = []
+        self.param_norm_list = []
+        
+        # dict to arr 
+        true_param_arr = np.zeros(len(true_inits_dict.items()))
+        for ind, true_param in enumerate(true_inits_dict.items()):
+            true_param_arr[ind] = true_param[-1]
+        self.true_param_arr = true_param_arr
   
     def __call__(self, epoch_idx, epoch_iteration_idx, loss, initial,
                  transition, emission, proposal):
         if epoch_iteration_idx % self.logging_interval == 0:
             with torch.no_grad():
-                print('Iteration {}: Loss = {}'.format(epoch_iteration_idx, loss))
                 # get all current params
                 curr_params = np.zeros(len(list(self.arm_model.parameters())))
                 for i in range(len(list(self.arm_model.parameters()))):
                     curr_params[i] = list(self.arm_model.parameters())[i].item()
+                param_norm = np.linalg.norm(curr_params - self.true_param_arr)
+                print('Epoch {}: Iteration {}: Loss = {}, Param. norm = {}'.format(
+                    epoch_idx, epoch_iteration_idx, loss, param_norm))
                 # log them
+                self.param_norm_list.append(param_norm)
                 self.curr_params_list.append(curr_params)
                 self.loss.append(loss)
             
