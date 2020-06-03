@@ -492,11 +492,12 @@ class Emission(nn.Module):
     """This Emission just picks theta_1 and (latents[-1][:,:,2]) theta_2
     (latents[-1][:,:,3])
     (latents[-1][:,:,1]), and adds noise. later will include 2D FW KIN """
-    def __init__(self, inits_dict, cov_mat, theta_indices):
+    def __init__(self, inits_dict, cov_mat, arm_class_instance, theta_indices):
         super(Emission, self).__init__()
+        self.arm_model = arm_class_instance
+        # self.L1 = inits_dict["L1"]
+        # self.L2 = inits_dict["L2"]
         self.cov_mat = torch.tensor(cov_mat, device = device) # should be nn.Parameter in the future
-        self.L1 = inits_dict["L1"]
-        self.L2 = inits_dict["L2"]
         self.theta_indices = theta_indices # should be a list, indicating which
         # elements of the state vectore are theta.
 
@@ -510,14 +511,14 @@ class Emission(nn.Module):
                 coords: torch.tensor [batch_size, num_particles, n_obs_dim]'''
         coords = torch.stack(
             (
-            torch.zeros_like(angles[:,:,0], device=device), # x_0
+            torch.zeros_like(angles[:,:,0], device = device), # x_0
             torch.zeros_like(angles[:,:,0], device = device), # y_0
-            self.L1*torch.cos(angles[:,:,0]), # x_1
-            self.L1*torch.sin(angles[:,:,0]), # y_1
-            self.L2*torch.cos(angles[:,:,0]+angles[:,:,1]) + 
-            self.L1*torch.cos(angles[:,:,0]), # x_2
-            self.L2*torch.sin(angles[:,:,0]+angles[:,:,1]) + 
-            self.L1*torch.sin(angles[:,:,0]), # y_2
+            self.arm_model.L1*torch.cos(angles[:,:,0]), # x_1
+            self.arm_model.L1*torch.sin(angles[:,:,0]), # y_1
+            self.arm_model.L2*torch.cos(angles[:,:,0]+angles[:,:,1]) + 
+            self.arm_model.L1*torch.cos(angles[:,:,0]), # x_2
+            self.arm_model.L2*torch.sin(angles[:,:,0]+angles[:,:,1]) + 
+            self.arm_model.L1*torch.sin(angles[:,:,0]), # y_2
             ), 
             dim=2)
         return coords
