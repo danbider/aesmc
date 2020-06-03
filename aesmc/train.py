@@ -28,7 +28,7 @@ def train(dataloader, num_particles, algorithm, initial, transition, emission,
     parameters = get_chained_params(initial, transition, emission, proposal)
     optimizer = optimizer_algorithm(parameters, **optimizer_kwargs)
     for epoch_idx in range(num_epochs):
-        torch.random.seed(0) # to make sure data loader repeats batches across epochs.
+        torch.manual_seed(0) # to make sure data loader repeats batches across epochs.
         for epoch_iteration_idx, observations in enumerate(dataloader):
             if num_iterations_per_epoch is not None:
                 if epoch_iteration_idx == num_iterations_per_epoch:
