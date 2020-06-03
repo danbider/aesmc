@@ -847,26 +847,28 @@ class Proposal(nn.Module):
                 aesmc.state.BatchShapeMode.FULLY_EXPANDED)        
 
 class TrainingStats(object):
-    def __init__(self, M1_true, M2_true,
+    def __init__(self, true_inits_dict, 
+                 arm_model_instance,
                  num_timesteps,
                  logging_interval=100):
-        self.M1_true = M1_true
-        self.M2_true = M2_true
+        self.arm_model = arm_model_instance
+        self.true_inits_dict = true_inits_dict
         self.logging_interval = logging_interval
-        self.curr_M1 = []
-        self.curr_M2 = []
+        self.curr_params_list = [] 
         self.loss = []
   
     def __call__(self, epoch_idx, epoch_iteration_idx, loss, initial,
                  transition, emission, proposal):
         if epoch_iteration_idx % self.logging_interval == 0:
-            print('Iteration {}: Loss = {}'.format(epoch_iteration_idx, loss))
-            self.curr_M1.append(transition.arm_model.M1.item())
-            self.curr_M2.append(transition.arm_model.M2.item()) # seemed to be better than detach().numpy()
-            self.loss.append(loss)
-            # print(np.round(np.linalg.norm(
-            #     np.array([emission.L1.detach().numpy(),emission.L2.detach().numpy()])-
-            #     np.array([self.L1_true, self.L2_true])),2))
+            with torch.no_grad():
+                print('Iteration {}: Loss = {}'.format(epoch_iteration_idx, loss))
+                # get all current params
+                curr_params = np.zeros(len(list(self.arm_model.parameters())))
+                for i in range(len(list(self.arm_model.parameters()))):
+                    curr_params[i] = list(self.arm_model.parameters())[i].item()
+                # log them
+                self.curr_params_list.append(curr_params)
+                self.loss.append(loss)
             
             
             
