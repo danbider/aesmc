@@ -24,14 +24,14 @@ class PlanarArmDyn(nn.Module): # 06/01: added inheritence nn.Module
         super(PlanarArmDyn, self).__init__()
 
         self.dt = dt
-        # self.M1 = inits_dict["M1"] # upper arm mass
-        # self.M2 = inits_dict["M2"] # forearm mass
-        self.L1 = inits_dict["L1"] # upper arm length
-        self.L2 = inits_dict["L2"] # forearm length
+        self.L1 = nn.Parameter(torch.Tensor([inits_dict["L1"]]).squeeze(), 
+                               requires_grad = learn_static) # upper arm length
+        self.L2 = nn.Parameter(torch.Tensor([inits_dict["L2"]]).squeeze(), 
+                               requires_grad = learn_static) # forearm length
         self.M1 = nn.Parameter(torch.Tensor([inits_dict["M1"]]).squeeze(), 
-                               requires_grad = learn_static) # upper arm mass
+                               requires_grad = False) # upper arm mass
         self.M2 = nn.Parameter(torch.Tensor([inits_dict["M2"]]).squeeze(), 
-                               requires_grad = learn_static) # forearm mass
+                               requires_grad = False) # forearm mass
         self.g = g # gravity constant
         self.dim_latents = 6
         self.include_gravity_fictitious = include_gravity_fictitious
