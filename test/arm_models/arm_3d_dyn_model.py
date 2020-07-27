@@ -21,7 +21,9 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         and could also appear in the proposal (either optimal or BPF)'''
     def __init__(self, dt, inits_dict, 
                  g, include_gravity_fictitious = True, 
-                 transform_torques=False, learn_static=False):
+                 transform_torques=False, 
+                 learn_static=False,
+                 restrict_to_plane = False):
         super(Arm_3D_Dyn, self).__init__()
 
         self.dt = dt
@@ -36,6 +38,7 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         self.g = g # gravity constant
         self.dim_latents = 12
         self.include_gravity_fictitious = include_gravity_fictitious
+        self.restrict_to_plane = restrict_to_plane
         self.transform_torques = transform_torques
         self.A = torch.tensor((-0.25)*np.eye(4), 
                               dtype = torch.double,
@@ -125,13 +128,12 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
             torch.Tensor([batch_size * num_particles, 2, 1]). Size is important for
             dot product later; should be a length-2 column vector.
             '''
-        assert(t1.shape[0] == t2.shape[0] and \
-           t1.shape[0] == t3.shape[0] and \
-               t1.shape[0] == t4.shape[0])
+        assert(t2.shape[0] == t3.shape[0] and \
+           t2.shape[0] == t4.shape[0])
         assert(dt1.shape[0] == dt2.shape[0] and \
            dt1.shape[0] == dt3.shape[0] and \
                dt1.shape[0] == dt4.shape[0])
-        assert(dt1.shape[0] == t1.shape[0])
+        assert(dt1.shape[0] == t2.shape[0])
         
         h_vec_tensor = torch.zeros(t2.shape[0], 4, 1,
                                    device = device) # output shape
@@ -276,25 +278,25 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         
         Args: 
             torque_vec_tens: latent forces from the last time point, 
-                torch.tensor [batch_size*num_particles, 2, 1].
+                torch.tensor [batch_size*num_particles, 4, 1].
                 ToDo: make sure it is viewed that way.
             
             D_mat_tens: output of self.D, inertia tensor that is computed from
                 static parameters and angles.
-                torch.tensor [batch_size*num_particles, 2, 2]. These dimensions are
+                torch.tensor [batch_size*num_particles, 4, 4]. These dimensions are
                 important [batch_size * num_particles, [squared mat]] 
                 because they allow us to later invert D
             
             h_vec_tens: output of self.h_vec, Coriolis and centripetal vector, 
                 computed from static params and 
                 instantaneus angular velocities and elbow angle.
-                torch.Tensor([batch_size * num_particles, 2, 1]). Size is important for
+                torch.Tensor([batch_size * num_particles, 4, 1]). Size is important for
                 dot product later; should be a length-2 column vector.
             
             c_vec_tens: output of self.c_vec, gravity vector.
                 computed from static parameters, current configuration of both angles 
                 and gravity constant.
-                torch.Tensor([batch_size * num_particles, 2, 1]). Size is important for
+                torch.Tensor([batch_size * num_particles, 4, 1]). Size is important for
                 dot product later; should be a length-2 column vector.
             
         Returns:
@@ -316,7 +318,17 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
             torch.Tensor([batch_size, num_particles, dim_latents])
             out: mean_fully_expanded 
             torch.Tensor([batch_size, num_particles, dim_latents]) 
-            deterministic argument for either transition/proposal'''
+            deterministic argument for either transition/proposal
+            x_{t-1} - previous_latents[-1] with elements
+            label_dict_full["state"] = [r'$\tau_1$', r'$\tau_2$', 
+                r'$\tau_3$', r'$\tau_4$',
+              r'$\theta_1$', r'$\theta_2$',
+              r'$\theta_3$', r'$\theta_4$',
+             r'$\dot{\theta}_1$', r'$\dot{\theta}_2$',
+            r'$\dot{\theta}_3$', r'$\dot{\theta}_4$']
+            '''
+        
+        
         
         batch_size = previous_latents[-1].shape[0]
         num_particles = previous_latents[-1].shape[1]
@@ -389,6 +401,11 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
 
         # deterministic first order Euler integration
         mean_fully_expanded = previous_latents[-1] + self.dt * ax
+        
+        if self.restrict_to_plane: # restricting the torques, angles, and velocities to lie on plane
+            # note, in the stochastic model, noise can take you out of the plane.
+           mean_fully_expanded[:,:,[1,3,5,7,9,11]] = torch.zeros(1, 
+                                                        dtype = torch.double)
         
         return mean_fully_expanded
         
