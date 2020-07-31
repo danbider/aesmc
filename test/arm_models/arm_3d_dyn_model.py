@@ -758,6 +758,11 @@ class Learned_Proposal(nn.Module):
                                          min = 0.01, max=10.0)
         mu_star = self.FF_mu(observations[time])
         
+        if torch.sum(torch.isnan(mu_star))>0:
+            print('count nans in observations[time]')
+            print(torch.sum(torch.isnan(observations[time])))
+            print(observations[time])
+            
         assert(torch.sum(torch.isnan(mu_star))==0)
         assert(torch.sum(torch.isnan(sigma_squared_star))==0)
         
