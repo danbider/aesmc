@@ -30,7 +30,7 @@ def train(dataloader, num_particles, algorithm, initial, transition, emission,
     for epoch_idx in range(num_epochs):
         torch.manual_seed(0) # to make sure data loader repeats batches across epochs.
         for epoch_iteration_idx, observations in enumerate(dataloader):
-            if torch.sum(torch.isnan(observations))>0:
+            if torch.sum(torch.isnan(torch.cat(observations)))>0:
                 continue
             if num_iterations_per_epoch is not None:
                 if epoch_iteration_idx == num_iterations_per_epoch:
