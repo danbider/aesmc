@@ -758,8 +758,8 @@ class Learned_Proposal(nn.Module):
                                          min = 0.01, max=10.0)
         mu_star = self.FF_mu(observations[time])
         
-        assert(torch.sum(torch.isnan(mu_star))==0 & \
-               torch.sum(torch.isnan(sigma_squared_star))==0)
+        assert(torch.sum(torch.isnan(mu_star))==0)
+        assert(torch.sum(torch.isnan(sigma_squared_star))==0)
         
         if time == 0:
             self.batch_size = observations[0].shape[0]
