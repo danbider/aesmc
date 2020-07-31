@@ -676,167 +676,8 @@ class Optimal_Proposal(nn.Module):
                     covariance_matrix=self.optimal_cov_t),
                 aesmc.state.BatchShapeMode.FULLY_EXPANDED)
 
-# class Bootstrap_Proposal(nn.Module):
-#     """This proposal is proportional to the transition.
-#     at step zero, the proposal should be set to the initial distribution
-#     at step t, the proposal should be set to the transition
-#     Args: ToDo: update
-#         scale_0, scale_t: scalars for __init__ method
-#         previous_latents: list of len num_timesteps, each entry is 
-#             torch.tensor([batch_size, num_particles, dim_latents])
-#         time: integer
-#     Returns:
-#         torch.distributions.Normal object. 
-#         at time=0, torch.tensor([batch_size, dim_latents]) 
-#         and at time!=0, torch.tensor([batch_size, num_particles, dim_latents])"""
-#     def __init__(self, dt, inits_dict, mu_0, cov_0, 
-#                  scale_force, scale_aux, g):
-#         super(Bootstrap_Proposal, self).__init__()
-#         self.dt = dt
-#         self.mu_0 = torch.tensor(mu_0, dtype = torch.double)
-#         self.cov_0 = torch.tensor(cov_0, dtype = torch.double)
-#         self.scale_force = scale_force # currently not used, i.e. assume = 1
-#         self.scale_aux = scale_aux # scale aux should be smaller than dt, or add it to every entry
-#         self.diag_mat = torch.diag(torch.tensor(np.concatenate(
-#                                     [np.repeat((self.scale_force**2) *
-#                                                self.dt**2,2), 
-#                                      np.repeat(self.scale_aux**2,4)]
-#                                     )))
-#         # ToDo: in DTC_2D I define these as nn.Parameters.
-#         # didn't do it here because maybe these should be defined globally.
-#         # could appear also in emission and potentially proposal.
-#         self.L1 = inits_dict["L1"] # upper arm length
-#         self.L2 = inits_dict["L2"] # forearm length
-#         self.M1 = inits_dict["M1"] # upper arm mass
-#         self.M2 = inits_dict["M2"] # forearm mass
-#         self.g = g # gravity constant, use only later
-#         self.dim_latents = 6
-    
-#     def D(self, t2):
-#         '''computes inertia tensor from static parameters and the current angle t2.
-#         in a deterministic world without batches and particles, this is a 2X2 matrix.
-#         Args: 
-#             t2: current elbow angle. torch.Tensor(batch_size * num_particles)
-#         Returns:
-#             torch.tensor [batch_size*num_particles, 2, 2]. These dimensions are
-#             important [large_batch_size, [squared mat]] 
-#             because they allow us to later invert D'''
-#         D_tensor = torch.zeros(t2.shape[0], 2, 2, dtype = torch.double)
-#         D_tensor[:,0,0] = self.L1**2*self.M1/3 + self.M2*(3*self.L1**2 + 
-#                             3*self.L1*self.L2*torch.cos(t2) + self.L2**2)/3
-#         D_tensor[:,0,1] = self.L2*self.M2*(3*self.L1*torch.cos(t2) + 2*self.L2)/6
-#         D_tensor[:,1,0] = self.L2*self.M2*(3*self.L1*torch.cos(t2) + 2*self.L2)/6
-#         D_tensor[:,1,1] = self.L2**2*self.M2/3*torch.ones_like(t2)
-        
-#         return D_tensor
-    
-#     @staticmethod
-#     def Newton_2nd(torque_vec_tens, 
-#                    D_mat_tens, h_vec_tens, c_vec_tens):
-#         # ToDo: think whether we want to log accel.
-#         '''compute instantaneous angular acceleration, a length-2 column vector, 
-#         according to Newton's second law: 
-#             force = mass*acceleration, 
-#         which in the angular setting (and in 2D), becomes: 
-#             torque (2X1) = intertia_tens (2X2) * angular_accel (2X1)
-#         Here, we are multiplying both sides of the equation by 
-#         intertia_tens**(-1) to remain with an expression for angular acceleration.
-#         We are also taking into account "fictitious forces" coriolis/centripetal and gravity
-#         forces. 
-#         The function executes three operations:
-#             (1) invert the intertia tensor, 
-#             (2) subtract "fictitious forces" from torque vector
-#             (3) compute the dot product between (1) and (2)
-        
-#         Args: 
-#             torque_vec_tens: latent forces from the last time point, 
-#                 torch.tensor [batch_size*num_particles, 2, 1].
-#                 ToDo: make sure it is viewed that way.
-            
-#             D_mat_tens: output of self.D, inertia tensor that is computed from
-#                 static parameters and angles.
-#                 torch.tensor [batch_size*num_particles, 2, 2]. These dimensions are
-#                 important [batch_size * num_particles, [squared mat]] 
-#                 because they allow us to later invert D
-            
-#             h_vec_tens: output of self.h_vec, Coriolis and centripetal vector, 
-#                 computed from static params and 
-#                 instantaneus angular velocities and elbow angle.
-#                 torch.Tensor([batch_size * num_particles, 2, 1]). Size is important for
-#                 dot product later; should be a length-2 column vector.
-            
-#             c_vec_tens: output of self.c_vec, gravity vector.
-#                 computed from static parameters, current configuration of both angles 
-#                 and gravity constant.
-#                 torch.Tensor([batch_size * num_particles, 2, 1]). Size is important for
-#                 dot product later; should be a length-2 column vector.
-            
-#         Returns:
-#             torch.Tensor([batch_size * num_particles, 2]). Should be a length-2 column vector
-#             if we have two angles -- matching the angular velocity and angle vectors.
-#             TODO: make sure that this tensor is logged when this function is called.
-#             potentially use wrapper that logs it inside emission. 
-#             in general, consider logging h_vec and c_vec
-#             '''
-#         D_inv_mat_tens = torch.inverse(D_mat_tens)
-#         brackets = torque_vec_tens - h_vec_tens - c_vec_tens 
-#         inst_accel = D_inv_mat_tens.matmul(brackets)
-#         # want the output of this to be 
-#         # size [batch_size, num_part, 2]. we view it differently outside
-#         return inst_accel # inst_accel.squeeze()
-    
-#     def forward(self, previous_latents=None, time=None, observations=None):
-        
-#         if time == 0: # initial
-#             return aesmc.state.set_batch_shape_mode(
-#                 torch.distributions.MultivariateNormal(
-#                     self.mu_0, self.cov_0), 
-#                 aesmc.state.BatchShapeMode.NOT_EXPANDED)
- 
-#         else: # transition
-            
-#             batch_size = previous_latents[-1].shape[0]
-#             num_particles = previous_latents[-1].shape[1]
-#             diag_expanded = self.diag_mat.expand(
-#                 batch_size,num_particles, 
-#                 self.dim_latents, 
-#                 self.dim_latents)
-            
-#             # start: compute a(x_{k-1}) of shape (batch_size*num_particles,6)
-#             ax = torch.zeros([batch_size, 
-#                           num_particles, 
-#                           self.dim_latents], dtype = torch.double) # save room
 
-    
-#             ax[:,:,2] = previous_latents[-1][:,:,4] # \dot{theta}_1
-#             ax[:,:,3] = previous_latents[-1][:,:,5] # \dot{theta}_2
-            
-#             # fill in the last two entries with Newton's second law
-#             inert_tens = self.D(previous_latents[-1][:,:,3].\
-#                                       view(batch_size*num_particles)) # 4th element in state
-#             torque_vec = previous_latents[-1][:,:,:2].\
-#                 view(batch_size*num_particles,2,1) # first two elements in state vec
-#             # for now, no gravity and fictitious forces
-#             c_vec = torch.zeros_like(torque_vec)
-#             h_vec = torch.zeros_like(torque_vec)
-            
-#             # compute accel using Netwon's second law
-#             accel = self.Newton_2nd(torque_vec, 
-#                                           inert_tens, h_vec, c_vec)
-            
-#             ax[:,:,4:] = accel.view(batch_size, num_particles, 2)
-#             # end: compute a(x_{k-1})
-#             # deterministic first order Euler integration
-#             mean_fully_expanded = previous_latents[-1] + self.dt * ax
-    
-#             # return distribution
-#             return aesmc.state.set_batch_shape_mode(
-#                 torch.distributions.MultivariateNormal(
-#                 mean_fully_expanded, diag_expanded), # float() was important
-#                 aesmc.state.BatchShapeMode.FULLY_EXPANDED)
-
-
-class Proposal(nn.Module):
+class Learned_Proposal(nn.Module):
     """This Proposal uses a linear FF mapping between (1) observations[0] -> mu[0]
     and {previous_latents[t-1], observations[t]} -> mu[t].
     The weights and biases of each mapping could be learned. 
@@ -851,48 +692,126 @@ class Proposal(nn.Module):
         torch.distributions.Normal object. 
         at time=0, torch.tensor([batch_size, dim_latents]) 
         and at time!=0, torch.tensor([batch_size, num_particles, dim_latents])"""
+    def __init__(self, initial_instance, 
+                 transition_instance, num_hidden_units):
+        super(Learned_Proposal, self).__init__()
+        # x_{t-1} = previous latents.
+        # a(x_{t-1}) = current loc of transition.
+        # all expressions below are tensors
+        
+        self.num_hidden_units = num_hidden_units # for FF nns
+        # initial distribution parameters.
+        self.sigma_squared_0 = torch.diag(initial_instance.cov_mat)
+        self.mu_0 = initial_instance.loc 
+        
+        # transition dist. params.
+        self.sigma_squared_t = torch.diag(transition_instance.diag_mat)
+        self.transition = transition_instance
+
+        self.dim_latents = self.sigma_squared_t.shape[0]
+        self.dim_obs = 9 # ToDo: maybe replace by other info.
+        
+        self.FF_mu = nn.Sequential(
+                nn.Linear(self.dim_obs, self.num_hidden_units),
+                nn.ReLU(),
+                nn.Linear(self.num_hidden_units,self.dim_latents)
+                ) # observations[t] -> mu[t]
+        
+        self.FF_var = nn.Sequential(
+                nn.Linear(self.dim_obs, self.num_hidden_units),
+                nn.ReLU(),
+                nn.Linear(self.num_hidden_units,self.dim_latents),
+                nn.Softplus()
+                ) # observations[t] -> sigma_squared[t]
+        
+        # input will be a double, so adapt model
+        # see https://github.com/pytorch/pytorch/issues/2138
+        self.FF_mu.double()
+        self.FF_mu.to(device)
+
+        self.FF_var.double()
+        self.FF_var.to(device)
+        
     
-    def __init__(self, scale_0, scale_t):
-        super(Proposal, self).__init__()
-        self.scale_0 = scale_0
-        self.scale_t = scale_t
-        self.lin_0 = nn.Sequential(
-                        nn.Linear(6, 2),
-                        nn.ReLU()) # observations[0] -> mu[0]
-        self.lin_t = nn.Sequential(
-                        nn.Linear(14, 2), # SHOULD BE 6,2 IN EULER
-                        nn.ReLU()) # {previous_latents[t-1], observations[t-1], observations[t]} -> mu[t]
+    @staticmethod
+    def get_sigma_squared_from_inverses(model_sigma_squared, sigma_squared_star):
+        proposed_precision_vec = 1.0/model_sigma_squared + 1.0/sigma_squared_star
+        return 1.0/proposed_precision_vec
+    
+    @staticmethod
+    def get_mu(proposed_sigma_squared, model_sigma_squared, 
+               model_mu, sigma_squared_star, mu_star):
+        proposed_mu = proposed_sigma_squared*( \
+            (1.0/model_sigma_squared)*model_mu + \
+            (1.0/sigma_squared_star)*mu_star)
+        return proposed_mu
+    
+    # @staticmethod
+    # def expand_tensor(tensor, num_particles):
+    #     batch_size = tensor.shape[0]
+    #     dim = tensor.shape[1]
+        
 
     def forward(self, previous_latents=None, time=None, observations=None):
+        
+        sigma_squared_star = torch.clamp(self.FF_var(observations[time]),
+                                         min = 0.01, max=10.0)
+        mu_star = self.FF_mu(observations[time])
+        
         if time == 0:
+            self.batch_size = observations[0].shape[0]
+            
+            proposed_sigma_squared = self.get_sigma_squared_from_inverses(
+                self.sigma_squared_0, 
+                sigma_squared_star)
+            
+            proposed_mu = self.get_mu(
+                proposed_sigma_squared, self.sigma_squared_0, 
+                self.mu_0, sigma_squared_star, mu_star
+                )
+
             return aesmc.state.set_batch_shape_mode(
-                torch.distributions.Normal(
-                    loc=self.lin_0(observations[0]),
-                    scale=self.scale_0),
-                aesmc.state.BatchShapeMode.BATCH_EXPANDED)
-        else:
+                        torch.distributions.Normal(
+                            loc=proposed_mu,
+                            scale=torch.sqrt(proposed_sigma_squared)),
+                        aesmc.state.BatchShapeMode.BATCH_EXPANDED)
+        else: # time > 0
             if time == 1:
                 self.batch_size, self.num_particles, self.dim_latents = previous_latents[-1].shape
-            expanded_obs_prev = aesmc.state.expand_observation(observations[time-1], self.num_particles) # expand current obs
-            expanded_obs = aesmc.state.expand_observation(observations[time], self.num_particles) # expand current obs
-            # concat previous latents with current expanded observation. then squeeze to batch_expanded mode
-            # i.e., [batch_size*num_particles, dim_latent+dim_observation]
-            # to apply a linear layer.
-            concat_squeezed = torch.cat([previous_latents[-1],
-                                         expanded_obs_prev,
-                        expanded_obs
-                        ], 
-                        dim=2).view(-1, previous_latents[-1].shape[2]+
-                                    expanded_obs.shape[2] +
-                                    expanded_obs_prev.shape[2] )
-            activ = self.lin_t(concat_squeezed)
-            mu_t = activ.view(self.batch_size, self.num_particles, self.dim_latents)
+            
+            fully_expanded_dims = [self.batch_size, 
+                        self.num_particles, 
+                        self.dim_latents]
+            
+            # transition sigma_squared
+            sigma_squared_t_expanded = self.sigma_squared_t.unsqueeze(0).unsqueeze(0).expand(fully_expanded_dims)
+            
+            sigma_squared_star_expanded = sigma_squared_star.unsqueeze(1).expand(
+                fully_expanded_dims)
+            
+            mu_star_expanded = mu_star.unsqueeze(1).expand(
+                fully_expanded_dims)
+            
+            proposed_sigma_squared = self.get_sigma_squared_from_inverses(
+                sigma_squared_t_expanded, 
+                sigma_squared_star_expanded)
+            
+            # mu_t is the deterministic forward dynamics
+            mu_t = self.transition.arm_model.forward(
+                previous_latents)
+            
+            proposed_mu = self.get_mu(
+                proposed_sigma_squared, sigma_squared_t_expanded, 
+                mu_t, sigma_squared_star_expanded, mu_star_expanded
+                )
+            
             
             return aesmc.state.set_batch_shape_mode(
-                torch.distributions.Normal(
-                    loc=mu_t,
-                    scale=self.scale_t),
-                aesmc.state.BatchShapeMode.FULLY_EXPANDED)        
+                        torch.distributions.Normal(
+                            loc=proposed_mu,
+                            scale=torch.sqrt(proposed_sigma_squared)),
+                        aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+                  
 
 class TrainingStats(object):
     def __init__(self, true_inits_dict, 

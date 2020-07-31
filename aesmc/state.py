@@ -1,6 +1,8 @@
 import enum
 import torch
 import warnings
+import sys
+import numpy as np
 
 
 class BatchShapeMode(enum.Enum):
@@ -139,7 +141,22 @@ def log_prob(distribution, value):
             (value_batch_shape_ndim == batch_shape_ndim) or
             ((value_batch_shape_ndim - 2) == batch_shape_ndim)
         ):
-            distribution._validate_sample(value)
+            try: # Dan's 07/31 addition for debugging learning the proposal
+                 distribution._validate_sample(value)
+            except Exception as e:
+                print(repr(e))
+                print("Inspect sample that failed:")
+                print(value)
+                print("Inspect distribution object:")
+                print(distribution)
+                print("Inspect distribution location:")
+                print(distribution.loc)
+                print(np.sum(np.isnan(distribution.loc.detach().cpu().numpy().flatten())))
+                print("Inspect distribution scale:")
+                print(distribution.scale) # works for normal distribution (not mv normal with cov_mat)
+                print(np.sum(np.isnan(distribution.scale.detach().cpu().numpy().flatten())))
+                exit()
+
             logp = distribution.log_prob(value)
         elif (value_batch_shape_ndim - 1) == batch_shape_ndim:
             logp = distribution.log_prob(value.transpose(0, 1)).transpose(0, 1)
