@@ -155,7 +155,7 @@ def log_prob(distribution, value):
                 print("Inspect distribution scale:")
                 print(distribution.scale) # works for normal distribution (not mv normal with cov_mat)
                 print(np.sum(np.isnan(distribution.scale.detach().cpu().numpy().flatten())))
-                exit()
+                sys.exit(1)
 
             logp = distribution.log_prob(value)
         elif (value_batch_shape_ndim - 1) == batch_shape_ndim:

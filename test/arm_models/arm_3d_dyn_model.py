@@ -772,6 +772,14 @@ class Learned_Proposal(nn.Module):
                 proposed_sigma_squared, self.sigma_squared_0, 
                 self.mu_0, sigma_squared_star, mu_star
                 )
+            
+            if torch.sum(torch.isnan(proposed_sigma_squared))>0:
+                print(time)
+                print("now proposed_sigma_squared, sigma_squared_star")
+                print(proposed_sigma_squared, sigma_squared_star)
+                print("now proposed_mu, mu_star")
+                print(proposed_mu, mu_star)
+                print(observations[time])
 
             return aesmc.state.set_batch_shape_mode(
                         torch.distributions.Normal(
@@ -807,6 +815,18 @@ class Learned_Proposal(nn.Module):
                 proposed_sigma_squared, sigma_squared_t_expanded, 
                 mu_t, sigma_squared_star_expanded, mu_star_expanded
                 )
+            
+            if torch.sum(torch.isnan(proposed_sigma_squared))>0:
+                print(time)
+                print("now proposed_sigma_squared, sigma_squared_star")
+                print(proposed_sigma_squared, sigma_squared_star)
+                print("now proposed_mu, mu_star, mu_t")
+                print(proposed_mu, mu_star, mu_t)
+                print("now observations")
+                print(observations[time])
+                print("now latents and how many nans")
+                print(previous_latents[-1])
+                print(torch.sum(torch.isnan(previous_latents[-1])))
             
             
             return aesmc.state.set_batch_shape_mode(
