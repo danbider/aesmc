@@ -45,6 +45,7 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         self.A = torch.tensor((-0.25)*np.eye(4), 
                               dtype = torch.double,
                               device = device) # add it as a parameter and input to init.
+        self.D_list = []
         # ToDo: could have instead of A, dim_intermediate = 10
         #  self.lin_t = nn.Sequential(
         #               nn.Linear(2, dim_intermediate), 
@@ -353,6 +354,7 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
                             t4 = previous_latents[-1][:,:,7].\
                                   contiguous().view(batch_size*num_particles)) 
         
+        self.D_list.append(inert_tens.cpu().detach().numpy())
             # grab the first four elements in previous state vec
         torque_vec = previous_latents[-1][:,:,:4].\
             contiguous().view(batch_size*num_particles,4,1) 
