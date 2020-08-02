@@ -23,7 +23,8 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
                  g, include_gravity_fictitious = True, 
                  transform_torques=False, 
                  learn_static=False,
-                 restrict_to_plane = False):
+                 restrict_to_plane = False,
+                 clamp_state_value = None):
         super(Arm_3D_Dyn, self).__init__()
 
         self.dt = dt
@@ -39,6 +40,7 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         self.dim_latents = 12
         self.include_gravity_fictitious = include_gravity_fictitious
         self.restrict_to_plane = restrict_to_plane
+        self.clamp_state_value = clamp_state_value
         self.transform_torques = transform_torques
         self.A = torch.tensor((-0.25)*np.eye(4), 
                               dtype = torch.double,
@@ -406,6 +408,11 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
             # note, in the stochastic model, noise can take you out of the plane.
            mean_fully_expanded[:,:,[1,3,5,7,9,11]] = torch.zeros(1, 
                                                         dtype = torch.double)
+           
+        if self.clamp_state_value is not None:
+            mean_fully_expanded = torch.clamp(mean_fully_expanded, 
+                                              min=-self.clamp_state_value, 
+                                              max = self.clamp_state_value)
         
         return mean_fully_expanded
         
