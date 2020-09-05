@@ -180,3 +180,45 @@ def sample_from_prior(initial, transition, emission, num_timesteps,
 
     return tuple(map(lambda values: list(map(squeeze_num_particles, values)),
                  [latents, observations]))
+
+def sim_data_from_model(model_dict, num_timesteps, batch_size, repeat_data):
+    '''this utility just allows to pass a model_dict with
+    "initial", "transition", and "emission" objects.'''
+    sim_lats, sim_observs = sample_from_prior(
+        model_dict["initial"], model_dict["transition"],
+        model_dict["emission"], num_timesteps, batch_size, repeat_data)
+    return sim_lats, sim_observs
+
+def compute_log_joint(full_model, latents, observations):
+    '''
+    loop over time points and compute p(x,y)
+    Args: 
+        full_model: dict with keys "initial", "transition", and "emission" which are torch.Distribution objects
+        latents: list of len num_timesteps with torch.size(batch_size, dim_latent). no particle dim.
+        observations: list of len num_timesteps with torch.size(batch_size, dim_observs). no particle dim.
+    Returns: scalar, log joint, for each element in the batch dimension, so torch.size(batch_size)
+    '''
+    inst_log_joint = []
+    for i in range(len(observations)):
+        if i == 0:
+            log_trans = full_model["initial"]().log_prob(
+                latents[0].unsqueeze(1))
+        else:
+            log_trans = full_model["transition"](
+                previous_latents=[latents[i - 1].unsqueeze(1)]).log_prob(
+                    latents[i].unsqueeze(1))
+        log_emission = full_model["emission"](
+            latents=[latents[i].unsqueeze(1)]).log_prob(
+                observations[i].unsqueeze(1))
+
+        inst_log_joint.append(
+            log_trans + log_emission
+        )  # eventually, list with len num_timesteps, each element torch.size([batch_size,1])
+
+    # list of tensors -> tensor of torch.size([num_timesteps, batch_size])
+    temp = torch.stack(inst_log_joint,
+                       dim=0).squeeze(-1)  # get rid of the particle dim
+    # sum across num_timesteps to get tensor of torch.Size([batch_size])
+    log_joint = torch.sum(temp, dim=0)
+
+    return log_joint

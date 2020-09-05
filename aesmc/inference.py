@@ -110,6 +110,7 @@ def infer(inference_algorithm, observations, initial, transition, emission,
                                  time=time, observations=observations)
         latent = state.sample(proposal_dist, batch_size, num_particles)
         latents_bar += [latent]
+        # print(np.max(latent.cpu().detach().numpy().flatten()))
         proposal_log_prob = state.log_prob(proposal_dist, latent)
         transition_log_prob = state.log_prob(
             transition(previous_latents=previous_latents_bar, time=time,
@@ -268,3 +269,31 @@ def sample_ancestral_index(log_weight):
         return torch.from_numpy(indices).long().cuda()
     else:
         return torch.from_numpy(indices).long()
+    
+def infer_latents(model_dict, observations, num_particles):
+    """wrapper around infer that allows to input a single model_dict
+    with the four distribution objects.
+    Args: 
+        model_dict: [dict] with initial, transition, emission, and proposal
+        observations: [list] of length num_timepoints with each entry a tensor
+        torch.Size(batch_size, dim_obs)
+        num_particles: [int]
+    Returns:
+        list with latents, log_weights, etc."""
+    import time as time
+    start_time_fw = time.time()
+    inference_result = infer(
+        inference_algorithm='smc',
+        observations=observations,
+        initial=model_dict["initial"],
+        transition=model_dict["transition"],
+        emission=model_dict["emission"],
+        proposal=model_dict["proposal"],
+        num_particles=num_particles,
+        return_log_weights=True,
+        return_log_marginal_likelihood=True,
+    )
+    print('run time for %i timesteps, %i batches, %i particles = %.2f' % \
+      (len(observations), observations[-1].shape[0],
+       num_particles, time.time() - start_time_fw))
+    return inference_result

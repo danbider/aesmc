@@ -70,3 +70,16 @@ def summarize_independent_smc_samplers(post_mean, post_var,
     else:
         print('method not supported. try weighted or uniform')
     return mean, var
+
+def send_inference_result_to_cpu(inference_result):
+    if torch.cuda.is_available():
+        keys = inference_result.keys()
+        for key in keys:
+            #print(key)
+            if type(inference_result[key]) is torch.Tensor:
+                inference_result[key] = inference_result[key].cpu()
+            elif type(inference_result[key]) is list:
+                if len(inference_result[key]) > 0:
+                    for i in range(len(inference_result[key])):
+                        inference_result[key][i] = inference_result[key][i].cpu()
+    return inference_result

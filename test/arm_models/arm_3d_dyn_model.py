@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import sin, cos
+import math
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
@@ -24,7 +25,12 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
                  transform_torques=False, 
                  learn_static=False,
                  restrict_to_plane = False,
-                 clamp_state_value = None):
+                 clamp_state_value = None,
+                 constrain_phase_space = False,
+                 angle_constraint = False,
+                 velocity_constraint = False,
+                 constrain_angles_hard = False,
+                 torque_dyn = 'Langevin'):
         super(Arm_3D_Dyn, self).__init__()
 
         self.dt = dt
@@ -41,11 +47,43 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         self.include_gravity_fictitious = include_gravity_fictitious
         self.restrict_to_plane = restrict_to_plane
         self.clamp_state_value = clamp_state_value
+        self.constrain_phase_space = constrain_phase_space
         self.transform_torques = transform_torques
+        self.constrain_angles_hard = constrain_angles_hard
         self.A = torch.tensor((-0.25)*np.eye(4), 
                               dtype = torch.double,
                               device = device) # add it as a parameter and input to init.
+        self.torque_dyn = torque_dyn
+        if self.torque_dyn is not None:
+            self.Langevin_lambda = 2.0 # can change this in the future.
+        
         self.D_list = []
+        
+        
+        self.angle_constraint = angle_constraint
+        # only if applying angle constraint
+        self.min_angles = [-.5*math.pi, 
+                           -.5*math.pi,
+                           0.0,
+                           -.5*math.pi]
+        self.max_angles = [.5*math.pi, 
+                           .5*math.pi,
+                           math.pi,
+                           .5*math.pi]
+        
+        self.velocity_constraint = velocity_constraint
+        # only if applying velocity constraint
+        self.min_velocities = [-30.0, 
+                           -30.0,
+                           -30.0,
+                           -30.0]
+        self.max_velocities = [30.0, 
+                           30.0,
+                           30.0,
+                           30.0]
+        
+        self.alpha_constraint = 2.0
+        
         # ToDo: could have instead of A, dim_intermediate = 10
         #  self.lin_t = nn.Sequential(
         #               nn.Linear(2, dim_intermediate), 
@@ -316,6 +354,84 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         # size [batch_size, num_part, 2]. we view it differently outside
         return inst_accel # inst_accel.squeeze()
     
+    def constrain_torques(self, torque_tens_curr, previous_latents):
+        '''Compare angles and angular velocities to their min/max bounds
+        and modify the torques to prevent exceeding these values.
+        if the angle goes out of bounds, a restoring force proportional to its angular velocity will push it back in bounds.
+        Input: 
+            self: arm model object that includes max/min values for theta.
+            state_tensor: the deterministic state of the arm that becomes the mean parameter of the transition distribution
+            not sure about the latter. maybe previous latents?
+        Output:
+            modified_state_tensor: with modified torques, or just modified torques, we'll see
+        
+        Another option -- constrain the velocity not angles
+        you could say -- if velocity > x, torque = torque - alpha*velocity'''
+        
+        if self.angle_constraint:
+            angles = previous_latents[-1][:,:,4:8] # at t-1
+            velocities = previous_latents[-1][:,:,8:] # at t-1
+            
+            max_angles_expanded = torch.tensor(self.max_angles).view(1,1,len(self.max_angles)).expand_as(angles)
+            min_angles_expanded = torch.tensor(self.min_angles).view(1,1,len(self.min_angles)).expand_as(angles)
+            
+            modified_torques = torque_tens_curr - self.alpha_constraint * \
+                torch.relu(angles - max_angles_expanded) * \
+                    torch.relu(velocities) \
+                    + self.alpha_constraint * \
+                torch.relu(min_angles_expanded - angles) * \
+                    torch.relu(-1.0 * velocities)
+                    
+            return modified_torques
+
+        
+        elif self.velocity_constraint:
+            
+            """I would do it with a smaller alpha than above"""
+            
+            velocities = previous_latents[-1][:,:,8:] # at t-1
+            max_velocity_expanded = torch.tensor(self.max_velocities).view(1,1,len(self.max_velocities)).expand_as(velocities)
+            min_velocity_expanded = torch.tensor(self.min_velocities).view(1,1,len(self.min_velocities)).expand_as(velocities)
+            
+            modified_torques = torque_tens_curr - self.alpha_constraint * \
+                torch.relu(velocities - max_velocity_expanded) * \
+                    torch.relu(velocities) \
+                    + self.alpha_constraint * \
+                torch.relu(min_velocity_expanded - velocities) * \
+                    torch.relu(-1.0 * velocities)
+        
+            return modified_torques
+        
+    def hard_constraint_angles(self, state_tensor):
+        '''clamp the angles at min/max value and set velocity=0 when crossing.
+        don't touch the torques.'''
+        
+        angles = state_tensor[:,:,4:8] # at current t
+        velocities = state_tensor[:,:,8:] # at current t
+        
+        modified_angles = torch.clone(angles).to(device)
+        modified_velocities = torch.clone(velocities).to(device)
+            
+        max_angles_expanded = torch.tensor(self.max_angles).view(1,1,len(self.max_angles)).expand_as(angles)
+        min_angles_expanded = torch.tensor(self.min_angles).view(1,1,len(self.min_angles)).expand_as(angles)
+        
+        modified_angles[angles > max_angles_expanded] = max_angles_expanded[angles > max_angles_expanded]
+        modified_angles[angles < min_angles_expanded] = min_angles_expanded[angles < min_angles_expanded]
+        
+        modified_velocities[angles>max_angles_expanded] = 0.0
+        modified_velocities[angles<min_angles_expanded] = 0.0
+                
+        modified_state_tensor = torch.cat((state_tensor[:,:,:4],
+                                              modified_angles,
+                                              modified_velocities), dim=2)
+        
+        return modified_state_tensor
+            
+        
+        
+
+        
+    
     def forward(self, previous_latents=None):
         '''input: previous_latents 
             torch.Tensor([batch_size, num_particles, dim_latents])
@@ -345,6 +461,9 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         
         ax[:,:,4:8] = previous_latents[-1][:,:,8:12] # =\dot{theta}_{t-1}
         
+        if self.torque_dyn == 'Langevin':
+            '''the additional \sigma_tau * torque_scale is added in the transition model'''
+            ax[:,:,:4] = -self.Langevin_lambda * previous_latents[-1][:,:,:4]
         # fill in the last four entries with Newton's second law
             # compute inertia tensor using t2, t3,t4 in previous state
         inert_tens = self.D(t2 = previous_latents[-1][:,:,5].\
@@ -355,16 +474,25 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
                                   contiguous().view(batch_size*num_particles)) 
         
         self.D_list.append(inert_tens.cpu().detach().numpy())
-            # grab the first four elements in previous state vec
-        torque_vec = previous_latents[-1][:,:,:4].\
+           
+        
+        if self.constrain_phase_space:
+            '''run the constraining fuction here on the effective torques.'''
+            torque_vec = self.constrain_torques(
+                                previous_latents[-1][:,:,:4], 
+                                previous_latents).\
             contiguous().view(batch_size*num_particles,4,1) 
+        else:
+            torque_vec = previous_latents[-1][:,:,:4].\
+                contiguous().view(batch_size*num_particles,4,1) 
         
         if self.transform_torques:
             """instead of ax[:,:,:2] = 0, we insert \dot{\tau} = A\tau"""
             ax[:,:,:4] = self.A.unsqueeze(0).expand(
                             batch_size*num_particles,4,4).matmul(
                                 torque_vec).view(
-                                    batch_size, num_particles, 4)                 
+                                    batch_size, num_particles, 4)
+        
             
         if self.include_gravity_fictitious:
             h_vec = self.h(t2 = previous_latents[-1][:,:,5].\
@@ -410,7 +538,11 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
             # note, in the stochastic model, noise can take you out of the plane.
            mean_fully_expanded[:,:,[1,3,5,7,9,11]] = torch.zeros(1, 
                                                         dtype = torch.double)
-           
+        
+        if self.constrain_angles_hard:
+            mean_fully_expanded = self.hard_constraint_angles(
+                                            mean_fully_expanded)
+        
         if self.clamp_state_value is not None:
             mean_fully_expanded = torch.clamp(mean_fully_expanded, 
                                               min=-self.clamp_state_value, 
@@ -593,262 +725,6 @@ class Emission(nn.Module):
             torch.distributions.MultivariateNormal(mean_tensor, self.cov_mat),
             aesmc.state.BatchShapeMode.FULLY_EXPANDED)
 
-# in previous models, this was called Bootstrap_Proposal_Short
-class Bootstrap_Proposal(nn.Module):
-    """This proposal is proportional to the transition.
-    at step zero, the proposal should be set to the initial distribution
-    at step t, the proposal should be set to the transition
-    Args: ToDo: update
-    Returns:
-        torch.distributions.Normal object. 
-        at time=0, torch.tensor([batch_size, dim_latents]) 
-        and at time!=0, torch.tensor([batch_size, num_particles, dim_latents])"""
-    def __init__(self, initial_instance, transition_instance):
-        super(Bootstrap_Proposal, self).__init__()
-        self.initial = initial_instance
-        self.transition = transition_instance
-    
-    def forward(self, previous_latents=None, time=None, observations=None):
-        
-        if time == 0: # initial
-            return self.initial()
-        else: # transition
-            return self.transition.forward(previous_latents = previous_latents)
-
-class Optimal_Proposal(nn.Module):
-    '''Currently not supported for 3D. 
-    this is an optimal proposal for a non-linear transition + linear
-    emission model.'''
-    def __init__(self, initial_instance, 
-                 transition_instance,
-                 emission_instance):
-        super(Optimal_Proposal, self).__init__()
-        # x_{t-1} = previous latents.
-        # a(x_{t-1}) = current loc of transition.
-        # all expressions below are tensors
-        self.cov_0 = initial_instance.cov_mat
-        self.precision_0 = torch.inverse(self.cov_0)
-        self.mu_0 = initial_instance.loc 
-        self.Q = transition_instance.diag_mat
-        self.R = emission_instance.R
-        self.C = emission_instance.C
-        self.Q_inv = torch.inverse(self.Q)
-        self.R_inv = torch.inverse(self.R)
-        self.optimal_precision_t = self.Q_inv + torch.transpose(
-                self.C, 0, 1).mm(self.R_inv.mm(self.C)) #  precision t>0
-        self.optimal_cov_t = torch.inverse(self.optimal_precision_t) # covariance t>0
-        self.optimal_precision_0 = self.precision_0 + \
-                        torch.transpose(
-                            self.C, 0, 1).mm(
-                                self.R_inv.mm(self.C))
-        self.optimal_cov_0 = torch.inverse(self.optimal_precision_0)
-        self.dim_latents = self.cov_0.shape[0]
-        self.transition = transition_instance
-        
-    def forward(self, previous_latents=None, time=None, observations=None):
-        
-        if time == 0:
-            self.batch_size = observations[0].shape[0]
-            
-            optimal_loc = self.optimal_cov_0.matmul(
-                self.precision_0.mm(self.mu_0.unsqueeze(-1)).expand(
-                    self.batch_size,self.dim_latents,1) + \
-                    torch.transpose(
-                        self.C, 0, 1).matmul( # (6X4)
-                            self.R_inv.matmul( # (4X4)
-                                observations[0].unsqueeze(-1))) # (10X4X1)
-                ).squeeze(-1)
-            return aesmc.state.set_batch_shape_mode(
-                torch.distributions.MultivariateNormal(
-                    loc=optimal_loc,
-                    covariance_matrix=self.optimal_cov_0),
-                aesmc.state.BatchShapeMode.BATCH_EXPANDED)
-        
-        else:
-            ax_t_min_1 = self.transition.arm_model.forward(
-                previous_latents)
-            
-            optimal_loc = self.optimal_cov_t.matmul(
-                self.Q_inv.matmul(ax_t_min_1.unsqueeze(-1)) + \
-                    torch.transpose(
-                        self.C, 0, 1).matmul( # (6X4)
-                            self.R_inv.matmul( # (4X4)
-                                aesmc.state.expand_observation(
-                                    observations[time], 
-                                    previous_latents[-1].shape[1])
-                                .unsqueeze(-1))) # (10X1000X4X1)
-                ).squeeze(-1)
-            
-            return aesmc.state.set_batch_shape_mode(
-                torch.distributions.MultivariateNormal(
-                    loc=optimal_loc,
-                    covariance_matrix=self.optimal_cov_t),
-                aesmc.state.BatchShapeMode.FULLY_EXPANDED)
-
-
-class Learned_Proposal(nn.Module):
-    """This Proposal uses a linear FF mapping between (1) observations[0] -> mu[0]
-    and {previous_latents[t-1], observations[t]} -> mu[t].
-    The weights and biases of each mapping could be learned. 
-    Args:
-        scale_0, scale_t: scalars for __init__ method
-        previous_latents: list of len num_timesteps, each entry is 
-            torch.tensor([batch_size, num_particles, dim_latents])
-        time: integer
-        observations: list of len num_timesteps. each entry is a
-        torch.tensor([batch_size, dim_observations]
-    Returns:
-        torch.distributions.Normal object. 
-        at time=0, torch.tensor([batch_size, dim_latents]) 
-        and at time!=0, torch.tensor([batch_size, num_particles, dim_latents])"""
-    def __init__(self, initial_instance, 
-                 transition_instance, num_hidden_units):
-        super(Learned_Proposal, self).__init__()
-        # x_{t-1} = previous latents.
-        # a(x_{t-1}) = current loc of transition.
-        # all expressions below are tensors
-        
-        self.num_hidden_units = num_hidden_units # for FF nns
-        # initial distribution parameters.
-        self.sigma_squared_0 = torch.diag(initial_instance.cov_mat)
-        self.mu_0 = initial_instance.loc 
-        
-        # transition dist. params.
-        self.sigma_squared_t = torch.diag(transition_instance.diag_mat)
-        self.transition = transition_instance
-
-        self.dim_latents = self.sigma_squared_t.shape[0]
-        self.dim_obs = 9 # ToDo: maybe replace by other info.
-        
-        self.FF_mu = nn.Sequential(
-                nn.Linear(self.dim_obs, self.num_hidden_units),
-                nn.ReLU(),
-                nn.Linear(self.num_hidden_units,self.dim_latents)
-                ) # observations[t] -> mu[t]
-        
-        self.FF_var = nn.Sequential(
-                nn.Linear(self.dim_obs, self.num_hidden_units),
-                nn.ReLU(),
-                nn.Linear(self.num_hidden_units,self.dim_latents),
-                nn.Softplus()
-                ) # observations[t] -> sigma_squared[t]
-        
-        # input will be a double, so adapt model
-        # see https://github.com/pytorch/pytorch/issues/2138
-        self.FF_mu.double()
-        self.FF_mu.to(device)
-
-        self.FF_var.double()
-        self.FF_var.to(device)
-        
-    
-    @staticmethod
-    def get_sigma_squared_from_inverses(model_sigma_squared, sigma_squared_star):
-        proposed_precision_vec = 1.0/model_sigma_squared + 1.0/sigma_squared_star
-        return 1.0/proposed_precision_vec
-    
-    @staticmethod
-    def get_mu(proposed_sigma_squared, model_sigma_squared, 
-               model_mu, sigma_squared_star, mu_star):
-        proposed_mu = proposed_sigma_squared*( \
-            (1.0/model_sigma_squared)*model_mu + \
-            (1.0/sigma_squared_star)*mu_star)
-        return proposed_mu
-    
-    # @staticmethod
-    # def expand_tensor(tensor, num_particles):
-    #     batch_size = tensor.shape[0]
-    #     dim = tensor.shape[1]
-        
-
-    def forward(self, previous_latents=None, time=None, observations=None):
-        
-        sigma_squared_star = torch.clamp(self.FF_var(observations[time]),
-                                         min = 0.01, max=10.0)
-        mu_star = self.FF_mu(observations[time])
-        
-        if torch.sum(torch.isnan(mu_star))>0:
-            print('count nans in observations[time]')
-            print(torch.sum(torch.isnan(observations[time])))
-            print(observations[time])
-            
-        assert(torch.sum(torch.isnan(mu_star))==0)
-        assert(torch.sum(torch.isnan(sigma_squared_star))==0)
-        
-        if time == 0:
-            self.batch_size = observations[0].shape[0]
-            
-            proposed_sigma_squared = self.get_sigma_squared_from_inverses(
-                self.sigma_squared_0, 
-                sigma_squared_star)
-            
-            proposed_mu = self.get_mu(
-                proposed_sigma_squared, self.sigma_squared_0, 
-                self.mu_0, sigma_squared_star, mu_star
-                )
-            
-            if torch.sum(torch.isnan(proposed_sigma_squared))>0:
-                print(time)
-                print("now proposed_sigma_squared, sigma_squared_star")
-                print(proposed_sigma_squared, sigma_squared_star)
-                print("now proposed_mu, mu_star")
-                print(proposed_mu, mu_star)
-                print(observations[time])
-
-            return aesmc.state.set_batch_shape_mode(
-                        torch.distributions.Normal(
-                            loc=proposed_mu,
-                            scale=torch.sqrt(proposed_sigma_squared)),
-                        aesmc.state.BatchShapeMode.BATCH_EXPANDED)
-        else: # time > 0
-            if time == 1:
-                self.batch_size, self.num_particles, self.dim_latents = previous_latents[-1].shape
-            
-            fully_expanded_dims = [self.batch_size, 
-                        self.num_particles, 
-                        self.dim_latents]
-            
-            # transition sigma_squared
-            sigma_squared_t_expanded = self.sigma_squared_t.unsqueeze(0).unsqueeze(0).expand(fully_expanded_dims)
-            
-            sigma_squared_star_expanded = sigma_squared_star.unsqueeze(1).expand(
-                fully_expanded_dims)
-            
-            mu_star_expanded = mu_star.unsqueeze(1).expand(
-                fully_expanded_dims)
-            
-            proposed_sigma_squared = self.get_sigma_squared_from_inverses(
-                sigma_squared_t_expanded, 
-                sigma_squared_star_expanded)
-            
-            # mu_t is the deterministic forward dynamics
-            mu_t = self.transition.arm_model.forward(
-                previous_latents)
-                        
-            proposed_mu = self.get_mu(
-                proposed_sigma_squared, sigma_squared_t_expanded, 
-                mu_t, sigma_squared_star_expanded, mu_star_expanded
-                )
-            
-            if torch.sum(torch.isnan(proposed_sigma_squared))>0:
-                print(time)
-                print("now proposed_sigma_squared, sigma_squared_star")
-                print(proposed_sigma_squared, sigma_squared_star)
-                print("now proposed_mu, mu_star, mu_t")
-                print(proposed_mu, mu_star, mu_t)
-                print("now observations")
-                print(observations[time])
-                print("now latents and how many nans")
-                print(previous_latents[-1])
-                print(torch.sum(torch.isnan(previous_latents[-1])))
-            
-            
-            return aesmc.state.set_batch_shape_mode(
-                        torch.distributions.Normal(
-                            loc=proposed_mu,
-                            scale=torch.sqrt(proposed_sigma_squared)),
-                        aesmc.state.BatchShapeMode.FULLY_EXPANDED)
-                  
 
 class TrainingStats(object):
     def __init__(self, true_inits_dict, 

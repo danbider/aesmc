@@ -1,0 +1,80 @@
+{
+
+#######################################
+## Input (will be automatically filled)
+#######################################
+
+"n_input_channels": null, # type: int
+
+"y_pixels": null, # type: int
+
+"x_pixels": null, # type: int
+
+"ae_input_dim": [null, null, null, null], # type: list, help: [input_channels, y_pix, x_pix]
+
+
+####################
+## General params ##
+####################
+
+"dim_latents": 6, # type: int, help: always 6 in the planar arm
+
+######################
+## Arm model params ##
+######################
+
+"dt": 0.01, # type: float, help: 0.01 is good
+
+"g": 1.0, # type: float, help: 1.0 is good, gravity in the -y direction
+
+"include_gravity_fictitious": 1, # type: int, help: 0 = False, 1 = True
+
+"torque_dyn": "Langevin", # type: str, help: "Langevin" | "random_walk"
+
+"Langevin_lambda": 5.0, # type: float, help: should be positive to be stable. Ratio with \sigma_{\tau} is important. This term has to be big enough so that the system returns to zero quickly enough
+
+"L1": 1.0, # type: float, help: upper arm length (James has units in his scripts)
+
+"L2": 1.0, # type: float, help: fore arm length (James has units in his scripts)
+
+"M1": 0.5, # type: float, help: upper arm mass (James has units in his scripts)
+
+"M2": 0.3, # type: float, help: fore arm mass (James has units in his scripts)
+
+####################
+## Initial Params ##
+####################
+
+"intial_loc": 0.0, # type: float, help: mu_0, transformed to a length 6 vector. 
+
+"torque_init_scale": 1.0, # type: float, help: transformed to a length 2 vector.
+
+"theta_init_scale": 1.0, # type: float, help: transformed to a length 2 vector. 
+
+"velocity_init_scale": 1.0, # type: float, help: transformed to a length 2 vector.
+
+#######################
+## Transition Params ##
+#######################
+
+"transition_force_scale": 20.0, # type: float, help: \sigma_{\tau}, transformed to a length 2 vector and affecting transition_aux_scale
+
+#####################
+## Emission Params ##
+#####################
+
+"emission_var_diag": 0.05, # type: float, help: positive, same for all observation dimensions. Should be small compared to L1, L2.
+
+"ae_decoding_kernel_size": [null], # type: list
+
+"ae_decoding_stride_size": [null], # type: list
+
+"ae_decoding layer_type": [null], # type: list
+
+"ae_decoding_last_FF_layer": 0, # type: int, help: 0 = False, 1 = True
+
+"ae_decoding_final_nonlin": "clamp", # type: str, help: 'linear' | 'sigmoid' | 'clamp'
+
+"clamp_minmax": [-1.0, 1.0] # type: list [min_val [float], max_val [float]]
+
+}
