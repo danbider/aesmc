@@ -372,8 +372,8 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
             angles = previous_latents[-1][:,:,4:8] # at t-1
             velocities = previous_latents[-1][:,:,8:] # at t-1
             
-            max_angles_expanded = torch.tensor(self.max_angles).view(1,1,len(self.max_angles)).expand_as(angles)
-            min_angles_expanded = torch.tensor(self.min_angles).view(1,1,len(self.min_angles)).expand_as(angles)
+            max_angles_expanded = torch.tensor(self.max_angles).view(1,1,len(self.max_angles)).expand_as(angles).to(device)
+            min_angles_expanded = torch.tensor(self.min_angles).view(1,1,len(self.min_angles)).expand_as(angles).to(device)
             
             modified_torques = torque_tens_curr - self.alpha_constraint * \
                 torch.relu(angles - max_angles_expanded) * \
@@ -390,8 +390,8 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
             """I would do it with a smaller alpha than above"""
             
             velocities = previous_latents[-1][:,:,8:] # at t-1
-            max_velocity_expanded = torch.tensor(self.max_velocities).view(1,1,len(self.max_velocities)).expand_as(velocities)
-            min_velocity_expanded = torch.tensor(self.min_velocities).view(1,1,len(self.min_velocities)).expand_as(velocities)
+            max_velocity_expanded = torch.tensor(self.max_velocities).view(1,1,len(self.max_velocities)).expand_as(velocities).to(device)
+            min_velocity_expanded = torch.tensor(self.min_velocities).view(1,1,len(self.min_velocities)).expand_as(velocities).to(device)
             
             modified_torques = torque_tens_curr - self.alpha_constraint * \
                 torch.relu(velocities - max_velocity_expanded) * \
@@ -423,7 +423,7 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
                 
         modified_state_tensor = torch.cat((state_tensor[:,:,:4],
                                               modified_angles,
-                                              modified_velocities), dim=2)
+                                              modified_velocities), dim=2).to(device)
         
         return modified_state_tensor
             
@@ -473,7 +473,7 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
                             t4 = previous_latents[-1][:,:,7].\
                                   contiguous().view(batch_size*num_particles)) 
         
-        self.D_list.append(inert_tens.cpu().detach().numpy())
+        #self.D_list.append(inert_tens.cpu().detach().numpy())
            
         
         if self.constrain_phase_space:

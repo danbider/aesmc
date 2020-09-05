@@ -62,6 +62,7 @@ def train_tracking_data(dataloader,
                 callback(epoch_idx, epoch_iteration_idx, loss, model["initial"], model["transition"],
                                     model["emission"], model["proposal"])
         print("epoch %i, average_loss %.2f" %(epoch_idx, np.mean(losses_arr[:, epoch_idx])))
+    return losses_arr
         
 
 def train(dataloader, num_particles, algorithm, initial, transition, emission,
