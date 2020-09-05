@@ -729,17 +729,12 @@ class TrainingStats(object):
     def __init__(self, true_inits_dict, 
                  arm_model_instance,
                  num_timesteps,
+                 num_iterations_per_epoch,
                  logging_interval=100):
         self.arm_model = arm_model_instance
         self.logging_interval = logging_interval
         self.arm_params_list = [] 
         self.loss = []
-        
-        # dict to arr 
-        true_param_arr = np.zeros(len(true_inits_dict.items()))
-        for ind, true_param in enumerate(true_inits_dict.items()):
-            true_param_arr[ind] = true_param[-1]
-        self.true_param_arr = true_param_arr
   
     def __call__(self, epoch_idx, epoch_iteration_idx, loss, model_dict):
         if epoch_iteration_idx % self.logging_interval == 0:
