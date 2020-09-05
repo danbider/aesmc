@@ -412,8 +412,8 @@ class Arm_3D_Dyn(nn.Module): # 06/01: added inheritence nn.Module
         modified_angles = torch.clone(angles).to(device)
         modified_velocities = torch.clone(velocities).to(device)
             
-        max_angles_expanded = torch.tensor(self.max_angles).view(1,1,len(self.max_angles)).expand_as(angles)
-        min_angles_expanded = torch.tensor(self.min_angles).view(1,1,len(self.min_angles)).expand_as(angles)
+        max_angles_expanded = torch.tensor(self.max_angles).view(1,1,len(self.max_angles)).expand_as(angles).to(device)
+        min_angles_expanded = torch.tensor(self.min_angles).view(1,1,len(self.min_angles)).expand_as(angles).to(device)
         
         modified_angles[angles > max_angles_expanded] = max_angles_expanded[angles > max_angles_expanded]
         modified_angles[angles < min_angles_expanded] = min_angles_expanded[angles < min_angles_expanded]
