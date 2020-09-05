@@ -7,6 +7,7 @@ import itertools
 import sys
 import torch.nn as nn
 import torch.utils.data
+import numpy as np
 
 
 def get_chained_params(*objects):
@@ -34,9 +35,12 @@ def train_tracking_data(dataloader,
     #                                 model["emission"], model["proposal"])
     # parameters = get_chained_params(model["initial"], model["transition"],
     #                                 model["emission"], model["proposal"])
-    print(list(parameters))
+    #print(list(parameters))
     #print('Training %i parameter groups' % len(list(parameters)))
     optimizer = optimizer_algorithm(parameters, **optimizer_kwargs)
+    num_iterations_per_epoch = len(dataloader)
+    losses_arr = np.zeros((num_iterations_per_epoch, num_epochs))
+
     for epoch_idx in range(num_epochs):
         #torch.manual_seed(0) # to make sure data loader repeats batches across epochs.
         for epoch_iteration_idx, (observations, t_ind_start) in enumerate(dataloader):
@@ -51,10 +55,14 @@ def train_tracking_data(dataloader,
                                     model["emission"], model["proposal"])
             loss.backward()
             optimizer.step()
+            
+            losses_arr[epoch_iteration_idx, epoch_idx] = loss.detach().cpu().numpy()
 
             if callback is not None:
                 callback(epoch_idx, epoch_iteration_idx, loss, model["initial"], model["transition"],
                                     model["emission"], model["proposal"])
+        print("epoch %i, average_loss %.2f" %(epoch_idx, np.mean(losses_arr[:, epoch_idx])))
+        
 
 def train(dataloader, num_particles, algorithm, initial, transition, emission,
           proposal, num_epochs, num_iterations_per_epoch=None,
