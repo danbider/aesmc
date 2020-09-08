@@ -217,10 +217,10 @@ class Learned_Proposal(nn.Module):
             '''take the current column of the param mat, and expand to (batch_size,dim_latents)'''
             sigma_squared_star = torch.clamp(self.sigma_mat[:, time], 
                                              min=0.01, max=100.0).expand(
-                                                 observations.shape[0])
+                                                 observations[time].shape[0])
             mu_star = torch.clamp(self.mu_mat[:, time], 
                                              min=-400.0, max=400.0).expand(
-                                                 observations.shape[0])
+                                                 observations[time].shape[0])
             
         elif self.h_type == 'bi-LSTM':
             if time == 0:
