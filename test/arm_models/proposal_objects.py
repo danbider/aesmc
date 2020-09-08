@@ -173,7 +173,7 @@ class Learned_Proposal(nn.Module):
                                                         scale=1.0, 
                                                         size=(self.dim_latents, self.num_timesteps)),
                                        requires_grad=True, dtype = torch.double, device = device))
-            self.sigma_mat = torch.nn.Parameter(torch.tensor(np.random.normal(loc=0.0, 
+            self.sigma_mat = torch.nn.Parameter(torch.tensor(np.random.gamma(shape=0.5, 
                                                         scale=1.0, 
                                                         size=(self.dim_latents, self.num_timesteps)),
                                        requires_grad=True, dtype = torch.double, device = device))
