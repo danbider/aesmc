@@ -321,8 +321,8 @@ def optimize_angles_single_frame(batch_size,
     else:
         angles_init = torch.tensor(
             np.random.vonmises(mu=0, kappa=8, size=(batch_size, 1, num_angles)),
-            requires_grad=True).to(
-                "cuda" if torch.cuda.is_available() else "cpu")
+            requires_grad=True, device = "cuda" if torch.cuda.is_available() else "cpu")
+        #.to("cuda" if torch.cuda.is_available() else "cpu")
 
     optimizer = torch.optim.Adam([angles_init], weight_decay=1e-5)
     loss_list = []
