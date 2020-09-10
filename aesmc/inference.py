@@ -292,6 +292,7 @@ def infer_latents(model_dict, observations, num_particles):
         num_particles=num_particles,
         return_log_weights=True,
         return_log_marginal_likelihood=True,
+        return_original_latents = True,
     )
     print('run time for %i timesteps, %i batches, %i particles = %.2f' % \
       (len(observations), observations[-1].shape[0],
