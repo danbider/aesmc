@@ -139,6 +139,13 @@ def uncenter_3D_coords(sliced, x_offset, y_offset, z_offset):
     data_non_centered = data_non_centered + temp_tile
     return data_non_centered
 
+def compute_2D_norms(data_mat):
+    a1_pre_norm = data_mat[:,[2,3]]-data_mat[:,[0,1]]
+    a2_pre_norm = data_mat[:,[4,5]]-data_mat[:,[2,3]]
+    norm_1 = np.linalg.norm(a1_pre_norm, axis=1)
+    norm_2 = np.linalg.norm(a2_pre_norm, axis=1)
+    return norm_1, norm_2
+
 def compute_3D_norms(data_mat):
     a1_pre_norm = data_mat[:,[3,4,5]]-data_mat[:,[0,1,2]]
     a2_pre_norm = data_mat[:,[6,7,8]]-data_mat[:,[3,4,5]]
@@ -294,6 +301,7 @@ def arr_to_list_of_tensors(dataset_arr, batch_size):
 
 def optimize_angles_single_frame(batch_size,
                                  FW_kin_func,
+                                 num_angles,
                                  observation,
                                  optim_steps=20000,
                                  replicated_batch=False,
@@ -306,13 +314,13 @@ def optimize_angles_single_frame(batch_size,
         obs_to_fit = observation
 
     if init_angles_from_prev is not None:
-        assert (init_angles_from_prev.shape == (batch_size, 1, 4))
+        assert (init_angles_from_prev.shape == (batch_size, 1, num_angles))
         angles_init = torch.tensor(
             init_angles_from_prev, requires_grad=True).to(
                 "cuda" if torch.cuda.is_available() else "cpu")
     else:
         angles_init = torch.tensor(
-            np.random.vonmises(mu=0, kappa=8, size=(batch_size, 1, 4)),
+            np.random.vonmises(mu=0, kappa=8, size=(batch_size, 1, num_angles)),
             requires_grad=True).to(
                 "cuda" if torch.cuda.is_available() else "cpu")
 
