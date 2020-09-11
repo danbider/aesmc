@@ -293,7 +293,7 @@ def arr_to_list_of_tensors(dataset_arr, batch_size):
         temp_tens = torch.tensor(dataset_arr[:, i]). \
             to("cuda" if torch.cuda.is_available() else "cpu")
         if batch_size>1:
-            temp_tens.unsqueeze(0).expand(
+           temp_tens = temp_tens.unsqueeze(0).expand(
                 batch_size, dataset_arr.shape[0])
         
         observations.append(temp_tens)
@@ -316,7 +316,7 @@ def optimize_angles_single_frame(batch_size,
     if init_angles_from_prev is not None:
         assert (init_angles_from_prev.shape == (batch_size, 1, num_angles))
         angles_init = torch.tensor(
-            init_angles_from_prev, requires_grad=True).to(
+            init_angles_from_prev, requires_grad=True, device = \
                 "cuda" if torch.cuda.is_available() else "cpu")
     else:
         angles_init = torch.tensor(
