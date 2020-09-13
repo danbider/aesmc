@@ -13,7 +13,7 @@ class smooth_result:
     def __init__(self, model, forward_inference_result, k_realizations):
         self.model = model
         self.forward_inference_result = forward_inference_result
-        self.num_timesteps = len(self.forward_inference_result["latents"])
+        self.num_timesteps = len(self.forward_inference_result["original_latents"])
         self.k_realizations = k_realizations
         self.smoothing_result = {}  # dict of lists
 
@@ -85,7 +85,7 @@ class smooth_result:
     def run_backward_smoothing(self):
 
         self.smoothing_result["normalized_weights"] = []
-        self.smoothing_result["latents"] = []
+        self.smoothing_result["original_latents"] = []
         self.smoothing_result["sampled_indices"] = []
 
         for t in range(self.num_timesteps - 1, -1, -1):
@@ -94,21 +94,21 @@ class smooth_result:
                     self.forward_inference_result["log_weights"][-1])  # Note index -1
                 sampled_indices, latents = self.sample_latents(
                     normalized_weights,
-                    self.forward_inference_result["latents"][-1])
+                    self.forward_inference_result["original_latents"][-1])
             else:
                 # compute weights
                 normalized_weights = self.weight_update(
-                    latents, self.forward_inference_result["latents"][t],
+                    latents, self.forward_inference_result["original_latents"][t],
                     self.forward_inference_result["log_weights"][t])
 
                 sampled_indices, latents = self.sample_latents(
                     normalized_weights,
-                    self.forward_inference_result["latents"][t])
+                    self.forward_inference_result["original_latents"][t])
 
             # below these lists will all be flipped (in time)
             self.smoothing_result["normalized_weights"].append(
                 normalized_weights)
-            self.smoothing_result["latents"].append(latents)
+            self.smoothing_result["original_latents"].append(latents)
             self.smoothing_result["sampled_indices"].append(sampled_indices)
 
         # flip order
@@ -121,7 +121,7 @@ class smooth_result:
     def summarize(self):
         '''compute mean and variance for our k realizations'''
         self.smooth_traj = torch.cat([
-            smooth.unsqueeze(-1) for smooth in self.smoothing_result["latents"]
+            smooth.unsqueeze(-1) for smooth in self.smoothing_result["original_latents"]
         ],
                                      dim=3)
         smooth_mean = torch.mean(self.smooth_traj,

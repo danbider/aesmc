@@ -724,6 +724,68 @@ class Emission(nn.Module):
         return aesmc.state.set_batch_shape_mode( 
             torch.distributions.MultivariateNormal(mean_tensor, self.cov_mat),
             aesmc.state.BatchShapeMode.FULLY_EXPANDED)
+    
+class Arm_3D_Linear_Dyn(nn.Module): # 06/01: added inheritence nn.Module
+    ''''the deterministics dynamics of the arm model. 
+        Computes the mean for transition(t)
+        and could also appear in the proposal (either optimal or BPF)'''
+    def __init__(self, dt, inits_dict, 
+                 learn_static=False,
+                 restrict_to_plane = False,
+                 clamp_state_value = None,
+                 constrain_phase_space = False,
+                 angle_constraint = False,
+                 velocity_constraint = False,
+                 constrain_angles_hard = False,
+                 torque_dyn = 'Langevin'):
+        super(Arm_3D_Linear_Dyn, self).__init__()
+
+        self.dt = dt
+        self.L1 = nn.Parameter(torch.Tensor([inits_dict["L1"]]).squeeze(), 
+                               requires_grad = learn_static) # upper arm length
+        self.L2 = nn.Parameter(torch.Tensor([inits_dict["L2"]]).squeeze(), 
+                               requires_grad = learn_static) # forearm length
+        self.dim_latents = 12
+        self.restrict_to_plane = restrict_to_plane
+        self.clamp_state_value = clamp_state_value
+        
+    def forward(self, previous_latents=None):
+        batch_size = previous_latents[-1].shape[0]
+        num_particles = previous_latents[-1].shape[1]
+        
+        # compute a(x_{k-1}) of shape (batch_size*num_particles,12)
+        ax = torch.zeros([batch_size, 
+                          num_particles, 
+                          self.dim_latents], 
+                         dtype = torch.double,
+                         device = device) # save room
+        
+        ax[:,:,4:8] = previous_latents[-1][:,:,8:12] # =\dot{theta}_{t-1}
+        ax[:,:,8:] = previous_latents[-1][:,:,:4] # =\ddot{theta}_{t-1}
+        
+        if self.accel_dyn == 'Langevin':
+            '''the additional \sigma_tau * accel_scale is added in the transition model'''
+            ax[:,:,:4] = -self.Langevin_lambda * previous_latents[-1][:,:,:4]
+        
+        # deterministic first order Euler integration
+        mean_fully_expanded = previous_latents[-1] + self.dt * ax
+        
+        if self.restrict_to_plane: # restricting the torques, angles, and velocities to lie on plane
+            # note, in the stochastic model, noise can take you out of the plane.
+           mean_fully_expanded[:,:,[1,3,5,7,9,11]] = torch.zeros(1, 
+                                                        dtype = torch.double)
+        
+        if self.constrain_angles_hard:
+            mean_fully_expanded = self.hard_constraint_angles(
+                                            mean_fully_expanded)
+        
+        if self.clamp_state_value is not None:
+            mean_fully_expanded = torch.clamp(mean_fully_expanded, 
+                                              min=-self.clamp_state_value, 
+                                              max = self.clamp_state_value)
+        
+        return mean_fully_expanded
+        
 
 class TrainingStats(object):
     def __init__(self, true_inits_dict, 
