@@ -79,8 +79,8 @@ class smooth_result:
         # torch.Size([k_realizations, batch_size, num_particles])
         normalized_weights = torch.tensor(
             math.exponentiate_and_normalize(
-                w_t_given_tplus1.detach().cpu().numpy(), dim=2), 
-            device="cuda" if torch.cuda.is_available() else "cpu")
+                w_t_given_tplus1.detach().cpu().numpy(), dim=2)) 
+            #,device="cuda" if torch.cuda.is_available() else "cpu")
         return normalized_weights
 
     def run_backward_smoothing(self):
